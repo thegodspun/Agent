@@ -79,6 +79,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("learn_from_texts", true)
         set(value) = prefs.edit().putBoolean("learn_from_texts", value).apply()
 
+    /** Read Google Messages chats (including RCS) off the screen while the user has them open. */
+    var readChatsOnScreen: Boolean
+        get() = prefs.getBoolean("read_chats_on_screen", true)
+        set(value) = prefs.edit().putBoolean("read_chats_on_screen", value).apply()
+
     var lastTextsLearnedAt: Long
         get() = prefs.getLong("last_texts_learned_at", 0)
         set(value) = prefs.edit().putLong("last_texts_learned_at", value).apply()

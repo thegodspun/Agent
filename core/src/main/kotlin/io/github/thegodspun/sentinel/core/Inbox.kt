@@ -12,6 +12,8 @@ data class CapturedNotification(
     val title: String,
     val text: String,
     val postedAt: String,
+    /** For messages read off the screen: the user sent it. */
+    val outgoing: Boolean = false,
 )
 
 /** Notifications waiting for the next sentinel review. Capped so it can't grow forever. */

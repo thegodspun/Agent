@@ -1,27 +1,83 @@
 package io.github.thegodspun.sentinel.service
 
 import android.accessibilityservice.AccessibilityService
+import android.graphics.Rect
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import io.github.thegodspun.sentinel.app
+import io.github.thegodspun.sentinel.core.CapturedNotification
+import io.github.thegodspun.sentinel.core.ScreenChatParser
+import io.github.thegodspun.sentinel.core.ScreenNode
+import java.time.LocalDateTime
 
 /**
  * Accessibility service that lets the agent operate other apps: read what is on screen,
- * tap buttons by their label, type into fields, scroll and press system buttons. It only
- * acts when a tool call asks it to; it ignores the event stream.
+ * tap buttons by their label, type into fields, scroll and press system buttons. Those only
+ * happen when a tool call asks. On its own it does one thing: while a Google Messages chat is
+ * open, it notes the visible messages so Sentinel can learn from RCS texts, which no other
+ * route exposes.
  */
 class PhoneControlService : AccessibilityService() {
+    private val handler = Handler(Looper.getMainLooper())
+    private val captureChat = Runnable { captureOpenChat() }
 
     override fun onServiceConnected() {
         instance = this
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(captureChat)
         instance = null
         super.onDestroy()
     }
 
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (event?.packageName?.toString() != MESSAGES_PACKAGE) return
+        val settings = app.settings
+        if (!settings.learnFromTexts || !settings.readChatsOnScreen) return
+        // Chats redraw constantly while open; read once things settle.
+        handler.removeCallbacks(captureChat)
+        handler.postDelayed(captureChat, 1_500)
+    }
+
+    private fun captureOpenChat() {
+        try {
+            val root = rootInActiveWindow ?: return
+            if (root.packageName?.toString() != MESSAGES_PACKAGE) return
+            val nodes = mutableListOf<ScreenNode>()
+            val bounds = Rect()
+            walk(root) { node ->
+                val text = node.text?.toString()
+                val description = node.contentDescription?.toString()
+                if (text.isNullOrBlank() && description.isNullOrBlank() && !node.isEditable) return@walk
+                node.getBoundsInScreen(bounds)
+                nodes += ScreenNode(text, description, bounds.left, bounds.top, bounds.right, bounds.bottom, node.isEditable)
+            }
+            val metrics = resources.displayMetrics
+            val chat = ScreenChatParser.parse(nodes, metrics.widthPixels, metrics.heightPixels) ?: return
+            val now = LocalDateTime.now().withNano(0).toString()
+            chat.messages
+                .filter { app.seenOnScreen.firstTime("${chat.person}|${it.outgoing}|${it.text}") }
+                .forEach {
+                    app.messages.add(
+                        CapturedNotification(
+                            app = "Messages (screen)",
+                            title = chat.person.take(100),
+                            text = it.text.take(1000),
+                            postedAt = now,
+                            outgoing = it.outgoing,
+                        )
+                    )
+                }
+        } catch (e: Exception) {
+            // Screen trees change underneath us; a missed read just waits for the next redraw.
+            Log.w("PhoneControlService", "Couldn't read the open chat", e)
+        }
+    }
     override fun onInterrupt() = Unit
 
     fun globalAction(name: String): Boolean {
@@ -118,6 +174,8 @@ class PhoneControlService : AccessibilityService() {
     }
 
     companion object {
+        const val MESSAGES_PACKAGE = "com.google.android.apps.messaging"
+
         @Volatile
         var instance: PhoneControlService? = null
             private set

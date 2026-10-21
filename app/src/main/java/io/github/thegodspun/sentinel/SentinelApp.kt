@@ -4,6 +4,7 @@ import android.app.Application
 import io.github.thegodspun.sentinel.core.HabitStore
 import io.github.thegodspun.sentinel.core.InboxStore
 import io.github.thegodspun.sentinel.core.NotesStore
+import io.github.thegodspun.sentinel.core.SeenStore
 import io.github.thegodspun.sentinel.core.TrackerStore
 import io.github.thegodspun.sentinel.service.AgentService
 import io.github.thegodspun.sentinel.work.SentinelWorker
@@ -25,6 +26,10 @@ class SentinelApp : Application() {
     lateinit var messages: InboxStore
         private set
 
+    /** On-screen chat messages already captured, so scrolling back doesn't capture them again. */
+    lateinit var seenOnScreen: SeenStore
+        private set
+
     override fun onCreate() {
         super.onCreate()
         settings = Settings(this)
@@ -33,6 +38,7 @@ class SentinelApp : Application() {
         inbox = InboxStore(File(filesDir, "inbox.json"))
         habits = HabitStore(File(filesDir, "habits.json"))
         messages = InboxStore(File(filesDir, "messages.json"), maxItems = 300)
+        seenOnScreen = SeenStore(File(filesDir, "seen_on_screen.json"))
         Notifications.createChannels(this)
         SentinelWorker.schedule(this)
         if (settings.alwaysOn) AgentService.start(this)

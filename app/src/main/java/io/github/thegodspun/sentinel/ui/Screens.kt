@@ -344,6 +344,7 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
     var wakeBriefing by remember { mutableStateOf(settings.wakeBriefing) }
     var habitLearning by remember { mutableStateOf(settings.habitLearning) }
     var learnFromTexts by remember { mutableStateOf(settings.learnFromTexts) }
+    var readChatsOnScreen by remember { mutableStateOf(settings.readChatsOnScreen) }
     var saved by remember { mutableStateOf(false) }
 
     val status = remember(refreshKey) { PermissionStatus.read(context) }
@@ -389,6 +390,11 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
         ToggleRow("Learn about me from my texts (needs Text messages permission)", learnFromTexts) {
             learnFromTexts = it; saved = false
         }
+        if (learnFromTexts) {
+            ToggleRow("Also read Google Messages chats I open, including RCS (needs Screen control)", readChatsOnScreen) {
+                readChatsOnScreen = it; saved = false
+            }
+        }
         OutlinedTextField(
             value = briefingHour, onValueChange = { briefingHour = it.filter(Char::isDigit).take(2); saved = false },
             label = {
@@ -417,6 +423,7 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
                 settings.wakeBriefing = wakeBriefing
                 settings.habitLearning = habitLearning
                 settings.learnFromTexts = learnFromTexts
+                settings.readChatsOnScreen = readChatsOnScreen
                 if (alwaysOn) AgentService.start(context) else AgentService.stop(context)
                 saved = true
             },
@@ -442,7 +449,7 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
         PermissionRow("Notification access (lets the sentinel spot deadlines)", status.notificationAccess) {
             actions.openNotificationAccess()
         }
-        PermissionRow("Screen control (Accessibility → Sentinel)", status.accessibility) {
+        PermissionRow("Screen control (Accessibility → Sentinel; also reads RCS chats you open)", status.accessibility) {
             actions.openAccessibility()
         }
         PermissionRow("Usage access (sleep, wake-up time and habit learning)", status.usageAccess) {

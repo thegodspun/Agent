@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">Sentinel</string>
     <string name="tile_label">Ask Sentinel</string>
-    <string name="accessibility_description">Lets Sentinel read the screen and tap, type, scroll and press Back or Home when you ask it to operate an app for you. Calls, texts and taps always ask you first. Nothing is read unless you give Sentinel a request.</string>
+    <string name="accessibility_description">Lets Sentinel read the screen and tap, type, scroll and press Back or Home when you ask it to operate an app for you. Calls, texts and taps always ask you first. Apart from your requests, the only thing it reads on its own is the Google Messages chat you have open (so it can learn from RCS texts), which you can turn off in Sentinel\'s Setup.</string>
 </resources>

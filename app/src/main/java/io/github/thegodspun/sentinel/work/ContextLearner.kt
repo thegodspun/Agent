@@ -13,9 +13,9 @@ import io.github.thegodspun.sentinel.texts.TextReader
 import java.time.LocalDateTime
 
 /**
- * Once a day, reads new texts (SMS history plus messages that arrived in messaging-app
- * notifications) and has Claude save what it learns about the user: people, routines,
- * plans and dates. The texts themselves are not kept.
+ * Once a day, reads new texts (SMS history, messages that arrived in messaging-app
+ * notifications, and Google Messages chats read off the screen) and has Claude save what it
+ * learns about the user: people, routines, plans and dates. The texts themselves are not kept.
  */
 object ContextLearner {
     private const val HOUR = 3_600_000L
@@ -34,7 +34,7 @@ object ContextLearner {
         val since = settings.lastTextsLearnedAt.takeIf { it > 0 } ?: (now - FIRST_RUN_DAYS * 24 * HOUR)
         val sms = TextReader.since(context, since)
         val fromNotifications = chatMessages.map {
-            TextMessage(time = it.postedAt, person = it.title, outgoing = false, body = it.text, source = it.app)
+            TextMessage(time = it.postedAt, person = it.title, outgoing = it.outgoing, body = it.text, source = it.app)
         }
         // A plain SMS shows up both in history and as a Messages notification; keep one copy.
         val batch = TextFilter.prepare((sms + fromNotifications).distinctBy { it.body.trim() }.sortedBy { it.time })
