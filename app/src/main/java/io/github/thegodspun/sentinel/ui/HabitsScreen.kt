@@ -4,26 +4,26 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,11 +34,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.thegodspun.sentinel.MainActivity
 import io.github.thegodspun.sentinel.app
+import io.github.thegodspun.sentinel.core.DaySummary
 import io.github.thegodspun.sentinel.core.HabitInsight
 import io.github.thegodspun.sentinel.core.HabitProfile
 import io.github.thegodspun.sentinel.habits.UsageCollector
@@ -68,146 +70,189 @@ fun HabitsTab(refreshKey: Int, actions: MainActivity.Actions, onAsk: (String) ->
         }
     }
     val data = remember(refreshKey, version) { app.habits.data() }
+    val facts = remember(refreshKey, version) { app.notes.all() }
     val today = LocalDate.now()
-    val week = data.days.filter { it.date < today.toString() }.takeLast(7)
+    val week = data.days.filter { it.date < today.toString() && (it.screenMinutes > 0 || it.wakeTime != null) }.takeLast(7)
+    val wake = HabitProfile.typicalWakeMinutes(data, today)
+    val bed = HabitProfile.typicalBedtimeMinutes(data, today)
+    val sleeps = data.days.takeLast(14).mapNotNull { it.sleepMinutes }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        if (!app.settings.habitLearning) {
-            InfoCard("Habit learning is off. Turn it on in Setup to let Sentinel learn your routine.")
-        } else if (!hasAccess) {
-            InfoCard(
-                "To learn your sleep, wake-up time and phone habits, Sentinel needs Usage access. " +
-                    "Only daily totals are sent to Claude, never what you looked at."
-            )
-            Button(onClick = actions::openUsageAccess, modifier = Modifier.fillMaxWidth()) { Text("Turn on Usage access") }
-        }
-
-        Button(
-            onClick = { onAsk(COACH_REQUEST) },
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.secondary,
-                contentColor = MaterialTheme.colorScheme.onSecondary,
-            ),
-        ) { Text("Coach me on my habits") }
-
-        Heading("Your rhythm")
-        val wake = HabitProfile.typicalWakeMinutes(data, today)
-        val bed = HabitProfile.typicalBedtimeMinutes(data, today)
-        val sleeps = week.mapNotNull { it.sleepMinutes }
-        if (wake == null && bed == null) {
-            Text("Still learning. It takes a few nights.", style = MaterialTheme.typography.bodyLarge)
-        } else {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                Stat("Usually up", wake?.let(HabitProfile::formatMinutes) ?: "—", Modifier.weight(1f))
-                Stat("Screen off", bed?.let(HabitProfile::formatMinutes) ?: "—", Modifier.weight(1f))
-                Stat("Night", if (sleeps.isEmpty()) "—" else HabitProfile.hours(sleeps.average()), Modifier.weight(1f))
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        GradientHeader(
+            eyebrow = "Habits",
+            title = if (wake == null) "Learning your rhythm" else "Your rhythm",
+            subtitle = when {
+                !app.settings.habitLearning -> "Habit learning is off in Setup"
+                !hasAccess -> "Turn on Usage access so Sentinel can learn"
+                week.isEmpty() -> "It takes a few nights to learn your routine"
+                else -> "Based on the last ${week.size} days"
+            },
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                RhythmStat(SentinelIcons.Sun, "Usually up", wake?.let(HabitProfile::formatMinutes) ?: "—", Modifier.weight(1f))
+                RhythmStat(SentinelIcons.Moon, "Screen off", bed?.let(HabitProfile::formatMinutes) ?: "—", Modifier.weight(1f))
+                RhythmStat(SentinelIcons.Bolt, "Per night", if (sleeps.isEmpty()) "—" else HabitProfile.hours(sleeps.average()), Modifier.weight(1f))
             }
         }
 
-        if (week.isNotEmpty()) {
-            Heading("Phone use, daily average (last ${week.size} days)")
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                Stat("Screen time", HabitProfile.hours(week.map { it.screenMinutes }.average()), Modifier.weight(1f))
-                Stat("Unlocks", week.map { it.unlocks }.average().roundToInt().toString(), Modifier.weight(1f))
-                Stat("12–5 a.m.", "${week.map { it.lateNightMinutes }.average().roundToInt()} min", Modifier.weight(1f))
-            }
-            val apps = week.flatMap { it.topApps }.groupBy { it.app }
-                .mapValues { (_, v) -> v.sumOf { it.minutes } / week.size }
-                .entries.sortedByDescending { it.value }.take(5)
-            if (apps.isNotEmpty()) {
-                Text("Top apps", fontWeight = FontWeight.SemiBold)
-                val max = apps.first().value.coerceAtLeast(1)
-                apps.forEach { (name, minutes) -> UsageBar(name, minutes, minutes.toFloat() / max) }
-            }
-
-            Heading("Day by day")
-            val dayFmt = DateTimeFormatter.ofPattern("EEE MMM d", Locale.US)
-            val timeFmt = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
-            week.reversed().forEach { d ->
-                val sleep = if (d.bedtime != null && d.wakeTime != null) {
-                    "${LocalDateTime.parse(d.bedtime).format(timeFmt)} → ${LocalDateTime.parse(d.wakeTime).format(timeFmt)}"
-                } else "sleep unknown"
-                Column {
-                    Text(LocalDate.parse(d.date).format(dayFmt), fontWeight = FontWeight.SemiBold)
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            if (app.settings.habitLearning && !hasAccess) {
+                SentinelCard {
+                    Text("Usage access needed", style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "$sleep · ${HabitProfile.hours(d.screenMinutes.toDouble())} screen · ${d.unlocks} unlocks" +
-                            if (d.lateNightMinutes > 0) " · ${d.lateNightMinutes} min after midnight" else "",
+                        "Sentinel learns your sleep, wake-up time and phone habits from Android's usage history. " +
+                            "Only daily totals are sent to Claude, never what you looked at.",
                         style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    SoftButton("Turn on Usage access", actions::openUsageAccess)
+                }
+            }
+
+            GradientButton("Coach me on my habits", onClick = { onAsk(COACH_REQUEST) }, icon = SentinelIcons.Sparkle)
+
+            if (week.isNotEmpty()) {
+                SectionTitle("Phone use")
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    StatTile("Screen time", HabitProfile.hours(week.map { it.screenMinutes }.average()), "a day", Modifier.weight(1f))
+                    StatTile("Unlocks", week.map { it.unlocks }.average().roundToInt().toString(), "a day", Modifier.weight(1f))
+                    StatTile("Late night", "${week.map { it.lateNightMinutes }.average().roundToInt()}m", "12–5 a.m.", Modifier.weight(1f))
+                }
+                TopApps(week)
+                SectionTitle("Day by day")
+                SentinelCard(padding = 8.dp) {
+                    week.reversed().forEachIndexed { i, d ->
+                        if (i > 0) RowDivider()
+                        DayRow(d)
+                    }
+                }
+            }
+
+            SectionTitle("Your goals")
+            SentinelCard {
+                GoalEditor(
+                    data.goals,
+                    onAdd = { app.habits.addGoal(it); version++ },
+                    onRemove = { app.habits.removeGoal(it); version++ },
+                )
+            }
+
+            SectionTitle("What Sentinel has noticed")
+            if (data.insights.isEmpty()) {
+                SentinelCard {
+                    Text(
+                        "Observations show up here after your first briefings, or when you ask to be coached.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-        }
+            data.insights.reversed().forEach { InsightCard(it) }
 
-        Heading("Your goals")
-        GoalEditor(data.goals, onAdd = { app.habits.addGoal(it); version++ }, onRemove = { app.habits.removeGoal(it); version++ })
-
-        Heading("What Sentinel has noticed")
-        if (data.insights.isEmpty()) {
-            Text(
-                "Nothing yet. Observations appear here after your first briefings or when you ask to be coached.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
+            SectionTitle("What Sentinel knows about you")
+            SentinelCard(padding = 8.dp) {
+                if (facts.isEmpty()) {
+                    Text(
+                        "Nothing saved yet. Sentinel saves facts here from your chats and texts. Remove anything that's wrong or that you'd rather it didn't keep.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(10.dp),
+                    )
+                }
+                facts.reversed().forEachIndexed { i, fact ->
+                    if (i > 0) RowDivider()
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 10.dp)) {
+                        Text(fact, Modifier.weight(1f).padding(vertical = 10.dp), style = MaterialTheme.typography.bodyLarge)
+                        IconButton(onClick = { app.notes.removeExact(fact); version++ }) {
+                            Icon(Icons.Filled.Close, "Forget this", tint = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
         }
-        data.insights.reversed().forEach { InsightRow(it) }
+    }
+}
 
-        Heading("What Sentinel knows about you")
-        val facts = remember(refreshKey, version) { app.notes.all() }
-        if (facts.isEmpty()) {
-            Text(
-                "Nothing saved yet. Sentinel saves facts here from your chats and, if you allow it, your texts. " +
-                    "Delete anything that's wrong or that you'd rather it didn't keep.",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
-        facts.reversed().forEach { fact ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(fact, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                IconButton(onClick = { app.notes.removeExact(fact); version++ }) { Icon(Icons.Filled.Delete, "Forget this") }
+@Composable
+private fun RhythmStat(icon: ImageVector, label: String, value: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(20.dp))
+            .background(SentinelColors.White.copy(alpha = 0.12f))
+            .padding(14.dp),
+    ) {
+        Icon(icon, null, tint = SentinelColors.GreenLight, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.height(10.dp))
+        Text(value, style = MaterialTheme.typography.titleLarge, color = SentinelColors.White, maxLines = 1)
+        Text(label, style = MaterialTheme.typography.bodySmall, color = SentinelColors.White.copy(alpha = 0.75f))
+    }
+}
+
+@Composable
+private fun StatTile(label: String, value: String, unit: String, modifier: Modifier = Modifier) {
+    SentinelCard(modifier, padding = 14.dp) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(6.dp))
+        Text(value, style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary, maxLines = 1)
+        Text(unit, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun TopApps(week: List<DaySummary>) {
+    val apps = week.flatMap { it.topApps }.groupBy { it.app }
+        .mapValues { (_, v) -> v.sumOf { it.minutes } / week.size }
+        .entries.sortedByDescending { it.value }.take(5)
+    if (apps.isEmpty()) return
+    val max = apps.first().value.coerceAtLeast(1)
+    SentinelCard {
+        Text("Most-used apps", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(12.dp))
+        apps.forEachIndexed { i, (name, minutes) ->
+            if (i > 0) Spacer(Modifier.height(12.dp))
+            Row(Modifier.fillMaxWidth()) {
+                Text(name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Text(HabitProfile.hours(minutes.toDouble()) + " / day", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(6.dp))
+            Box(Modifier.fillMaxWidth().height(10.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
+                Box(
+                    Modifier.fillMaxWidth((minutes.toFloat() / max).coerceIn(0.03f, 1f)).fillMaxHeight()
+                        .clip(CircleShape).background(SentinelBrushes.Progress)
+                )
             }
         }
-        Spacer(Modifier.height(16.dp))
     }
 }
 
 @Composable
-private fun Heading(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-}
-
-@Composable
-private fun InfoCard(text: String) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text(text, Modifier.padding(14.dp), color = MaterialTheme.colorScheme.onPrimaryContainer) }
-}
-
-@Composable
-private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
-    Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-        Column(Modifier.padding(12.dp)) {
-            Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            Text(label, style = MaterialTheme.typography.bodySmall)
+private fun DayRow(d: DaySummary) {
+    val dayFmt = DateTimeFormatter.ofPattern("EEE, MMM d", Locale.US)
+    val timeFmt = DateTimeFormatter.ofPattern("h:mm a", Locale.US)
+    val sleep = runCatching {
+        if (d.bedtime != null && d.wakeTime != null) {
+            "${LocalDateTime.parse(d.bedtime).format(timeFmt)} → ${LocalDateTime.parse(d.wakeTime).format(timeFmt)}"
+        } else null
+    }.getOrNull()
+    Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(runCatching { LocalDate.parse(d.date).format(dayFmt) }.getOrDefault(d.date), style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(SentinelIcons.Moon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(12.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(sleep ?: "Sleep unknown", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-    }
-}
-
-@Composable
-private fun UsageBar(app: String, minutes: Int, fraction: Float) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth()) {
-            Text(app, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            Text(HabitProfile.hours(minutes.toDouble()), style = MaterialTheme.typography.bodyMedium)
-        }
-        Box(Modifier.fillMaxWidth().height(8.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)) {
-            Box(
-                Modifier.fillMaxWidth(fraction.coerceIn(0.02f, 1f)).height(8.dp)
-                    .background(MaterialTheme.colorScheme.primary, CircleShape)
-            )
+        Column(horizontalAlignment = Alignment.End) {
+            Text(HabitProfile.hours(d.screenMinutes.toDouble()), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            if (d.lateNightMinutes > 0) {
+                Text("${d.lateNightMinutes}m after midnight", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            } else {
+                Text("${d.unlocks} unlocks", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -217,33 +262,50 @@ private fun GoalEditor(goals: List<String>, onAdd: (String) -> Unit, onRemove: (
     var draft by remember { mutableStateOf("") }
     goals.forEach { goal ->
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("• $goal", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-            IconButton(onClick = { onRemove(goal) }) { Icon(Icons.Filled.Delete, "Remove goal") }
+            Box(Modifier.size(10.dp).clip(CircleShape).background(SentinelBrushes.Go))
+            Spacer(Modifier.width(12.dp))
+            Text(goal, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            IconButton(onClick = { onRemove(goal) }) { Icon(Icons.Filled.Close, "Remove goal", tint = MaterialTheme.colorScheme.outline) }
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
-            value = draft, onValueChange = { draft = it }, modifier = Modifier.weight(1f),
-            placeholder = { Text("e.g. Phone down by midnight") }, singleLine = true,
+    if (goals.isNotEmpty()) Spacer(Modifier.height(8.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        SoftTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            label = "Add a goal",
+            placeholder = "e.g. Phone down by midnight",
+            modifier = Modifier.weight(1f),
         )
-        Button(onClick = { if (draft.isNotBlank()) { onAdd(draft); draft = "" } }) { Text("Add") }
+        Spacer(Modifier.width(10.dp))
+        Box(
+            Modifier.size(52.dp).clip(CircleShape).background(SentinelBrushes.Go),
+            contentAlignment = Alignment.Center,
+        ) {
+            IconButton(onClick = { if (draft.isNotBlank()) { onAdd(draft.trim()); draft = "" } }) {
+                Icon(Icons.Filled.Add, "Add goal", tint = SentinelColors.White)
+            }
+        }
     }
 }
 
 @Composable
-private fun InsightRow(insight: HabitInsight) {
-    val (label, color) = when (insight.kind) {
-        "good_habit" -> "Going well" to MaterialTheme.colorScheme.secondary
-        "bad_habit" -> "Work on this" to MaterialTheme.colorScheme.error
-        "suggestion" -> "Try this" to MaterialTheme.colorScheme.primary
-        else -> "Pattern" to MaterialTheme.colorScheme.onSurfaceVariant
+private fun InsightCard(insight: HabitInsight) {
+    val scheme = MaterialTheme.colorScheme
+    val (label, accent) = when (insight.kind) {
+        "good_habit" -> "Going well" to scheme.secondary
+        "bad_habit" -> "Work on this" to scheme.error
+        "suggestion" -> "Try this" to scheme.primary
+        else -> "Pattern" to scheme.onSurfaceVariant
     }
-    Row(verticalAlignment = Alignment.Top) {
-        Box(Modifier.padding(top = 6.dp).size(10.dp).background(color, CircleShape))
-        Spacer(Modifier.size(10.dp))
-        Column {
-            Text("$label · ${insight.date}", style = MaterialTheme.typography.labelMedium, color = color)
-            Text(insight.text, style = MaterialTheme.typography.bodyLarge)
+    SentinelCard(padding = 0.dp) {
+        Row(Modifier.height(IntrinsicSize.Min)) {
+            Box(Modifier.width(6.dp).fillMaxHeight().background(accent))
+            Column(Modifier.padding(16.dp)) {
+                Text("$label · ${insight.date}", style = MaterialTheme.typography.labelMedium, color = accent)
+                Spacer(Modifier.height(4.dp))
+                Text(insight.text, style = MaterialTheme.typography.bodyLarge)
+            }
         }
     }
 }

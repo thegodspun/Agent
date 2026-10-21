@@ -6,59 +6,56 @@ import android.content.pm.PackageManager
 import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -67,10 +64,17 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import io.github.thegodspun.sentinel.MainActivity
@@ -81,51 +85,31 @@ import io.github.thegodspun.sentinel.service.AgentService
 import io.github.thegodspun.sentinel.service.NotificationWatcher
 import io.github.thegodspun.sentinel.service.PhoneControlService
 import io.github.thegodspun.sentinel.work.SentinelWorker
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+private val TABS = listOf(
+    NavTab("Chat", SentinelIcons.Chat),
+    NavTab("Habits", SentinelIcons.Insights),
+    NavTab("Tracker", SentinelIcons.Tasks),
+    NavTab("Setup", SentinelIcons.Tune),
+)
+
 @Composable
 fun SentinelScreen(chat: ChatViewModel, refreshKey: Int, actions: MainActivity.Actions) {
     val context = LocalContext.current
     var tab by rememberSaveable { mutableIntStateOf(if (context.app.settings.apiKey.isBlank()) 3 else 0) }
+    // Hide the tab bar while typing so the keyboard has the room.
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(listOf("Sentinel", "Habits", "Tracker", "Setup")[tab], fontWeight = FontWeight.Bold) },
-                actions = {
-                    if (tab == 0) TextButton(onClick = chat::newChat) { Text("New chat", color = SentinelColors.White) }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = HeaderBlue,
-                    titleContentColor = SentinelColors.White,
-                    actionIconContentColor = SentinelColors.White,
-                ),
-            )
-        },
-        bottomBar = {
-            NavigationBar {
-                val itemColors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
-                )
-                listOf(
-                    "Chat" to Icons.Filled.Home,
-                    "Habits" to Icons.Filled.Favorite,
-                    "Tracker" to Icons.Filled.List,
-                    "Setup" to Icons.Filled.Settings,
-                ).forEachIndexed { index, (label, icon) ->
-                    NavigationBarItem(
-                        selected = tab == index,
-                        onClick = { tab = index },
-                        icon = { Icon(icon, null) },
-                        label = { Text(label) },
-                        colors = itemColors,
-                    )
-                }
-            }
-        },
+        containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = { if (!imeVisible) PillNavBar(TABS, tab) { tab = it } },
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize()) {
             when (tab) {
@@ -141,13 +125,36 @@ fun SentinelScreen(chat: ChatViewModel, refreshKey: Int, actions: MainActivity.A
     confirmation?.let { pending ->
         AlertDialog(
             onDismissRequest = { chat.answerConfirmation(false) },
+            icon = { IconBadge(SentinelIcons.Shield, size = 48.dp) },
             title = { Text("Allow this?") },
             text = { Text(pending.question, style = MaterialTheme.typography.bodyLarge) },
-            confirmButton = { Button(onClick = { chat.answerConfirmation(true) }) { Text("Yes, do it") } },
-            dismissButton = { OutlinedButton(onClick = { chat.answerConfirmation(false) }) { Text("No") } },
+            confirmButton = {
+                Button(
+                    onClick = { chat.answerConfirmation(true) },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) { Text("Allow") }
+            },
+            dismissButton = {
+                TextButton(onClick = { chat.answerConfirmation(false) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Not now") }
+            },
+            shape = RoundedCornerShape(28.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
         )
     }
 }
+
+// ---------------------------------------------------------------- Chat
+
+private data class Suggestion(val icon: ImageVector, val text: String)
+
+private val SUGGESTIONS = listOf(
+    Suggestion(SentinelIcons.Sparkle, "What benefits and services should I look into first? Ask me what you need to know."),
+    Suggestion(SentinelIcons.Tasks, "What's due this week?"),
+    Suggestion(SentinelIcons.Insights, "What bad habits have you noticed, and what should I change first?"),
+    Suggestion(SentinelIcons.Bell, "Help me keep track of a letter I got from Social Security."),
+    Suggestion(SentinelIcons.Bolt, "Set a timer for 15 minutes for a pressure relief shift."),
+)
 
 @Composable
 private fun ChatTab(chat: ChatViewModel, actions: MainActivity.Actions) {
@@ -156,179 +163,319 @@ private fun ChatTab(chat: ChatViewModel, actions: MainActivity.Actions) {
     var draft by rememberSaveable { mutableStateOf("") }
     val listState = rememberLazyListState()
     val settings = LocalContext.current.app.settings
-    val briefing = settings.lastBriefing
-    val briefingAt = settings.lastBriefingAt
+    val scrolled by remember { derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 60 } }
 
     LaunchedEffect(lines.size, status) {
-        val count = lines.size + if (status != null) 1 else 0
-        if (count > 0) listState.animateScrollToItem(count - 1)
+        if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size + if (status != null) 1 else 0)
     }
 
-    Column(Modifier.fillMaxSize().imePadding()) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if (lines.isEmpty()) {
-                item { Welcome(briefing, briefingAt, onSuggestion = chat::send) }
-            }
-            items(lines) { line -> Bubble(line) }
-            if (status != null) {
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.size(8.dp))
-                        Text(status.orEmpty(), style = MaterialTheme.typography.bodyMedium)
-                    }
+    fun submit() {
+        if (draft.isNotBlank()) {
+            chat.send(draft.trim())
+            draft = ""
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().imePadding()) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item(key = "header") {
+                    ChatHeader(
+                        briefing = settings.lastBriefing,
+                        briefingAt = settings.lastBriefingAt,
+                        compact = lines.isNotEmpty(),
+                        onNewChat = chat::newChat,
+                    )
+                }
+                if (lines.isEmpty()) {
+                    item(key = "suggestions") { Suggestions(onPick = chat::send) }
+                }
+                items(lines) { line -> Bubble(line) }
+                if (status != null) {
+                    item(key = "thinking") { Thinking(status.orEmpty()) }
                 }
             }
-        }
-        Row(
-            Modifier.fillMaxWidth().padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Ask or tell me anything") },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { chat.send(draft); draft = "" }),
-                maxLines = 4,
+            Composer(
+                draft = draft,
+                onDraft = { draft = it },
+                busy = status != null,
+                onSend = ::submit,
+                onTalk = actions::listen,
             )
-            if (draft.isBlank()) {
-                Button(
-                    onClick = actions::listen,
-                    modifier = Modifier.height(56.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary,
-                    ),
-                ) { Text("Talk", fontWeight = FontWeight.Bold) }
-            } else {
-                Button(onClick = { chat.send(draft); draft = "" }, modifier = Modifier.height(56.dp)) { Text("Send") }
+        }
+        // Keeps scrolled messages from running under the status bar icons.
+        if (scrolled) {
+            Box(
+                Modifier.fillMaxWidth()
+                    .windowInsetsTopHeight(WindowInsets.statusBars)
+                    .background(MaterialTheme.colorScheme.background.copy(alpha = 0.96f))
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChatHeader(briefing: String, briefingAt: Long, compact: Boolean, onNewChat: () -> Unit) {
+    val today = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, MMMM d", Locale.US))
+    GradientHeader(
+        eyebrow = today,
+        title = greeting(),
+        subtitle = if (compact) null else "Sentinel is keeping watch.",
+        action = if (compact) {
+            { HeaderIconButton(SentinelIcons.NewChat, "New chat", onNewChat) }
+        } else null,
+        content = if (compact) null else {
+            {
+                GlassPanel {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(SentinelIcons.Sun, null, tint = SentinelColors.GreenLight, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        val time = if (briefingAt > 0) {
+                            " · " + Instant.ofEpochMilli(briefingAt).atZone(ZoneId.systemDefault())
+                                .format(DateTimeFormatter.ofPattern("EEE h:mm a", Locale.US))
+                        } else ""
+                        Text("Latest briefing$time", style = MaterialTheme.typography.labelLarge, color = SentinelColors.White)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        briefing.ifBlank {
+                            "Your first briefing arrives when you wake up and pick up your phone: what's due, what came in overnight, and a note on your habits."
+                        },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = SentinelColors.White.copy(alpha = if (briefing.isBlank()) 0.75f else 0.95f),
+                    )
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun Suggestions(onPick: (String) -> Unit) {
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle("Try asking")
+        SUGGESTIONS.forEach { s ->
+            SentinelCard(padding = 14.dp, onClick = { onPick(s.text) }) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconBadge(s.icon, size = 36.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Text(s.text, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                }
             }
         }
     }
 }
 
-private val SUGGESTIONS = listOf(
-    "What benefits and services should I look into first? Ask me what you need to know.",
-    "What's due this week?",
-    "What bad habits have you noticed, and what should I change first?",
-    "Help me keep track of a letter I got from Social Security.",
-    "Set a timer for 15 minutes for a pressure relief shift.",
-)
-
 @Composable
-private fun Welcome(briefing: String, briefingAt: Long, onSuggestion: (String) -> Unit) {
-    Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (briefing.isNotBlank()) {
-            Card(
-                Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ),
-            ) {
-                Column(Modifier.padding(14.dp)) {
-                    val time = if (briefingAt > 0) {
-                        " · " + java.time.Instant.ofEpochMilli(briefingAt).atZone(java.time.ZoneId.systemDefault())
-                            .format(java.time.format.DateTimeFormatter.ofPattern("EEE h:mm a", java.util.Locale.US))
-                    } else ""
-                    Text("Your briefing$time", fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(4.dp))
-                    Text(briefing, style = MaterialTheme.typography.bodyLarge)
-                }
-            }
-        }
-        Text("Try asking:", style = MaterialTheme.typography.titleSmall)
-        SUGGESTIONS.forEach { suggestion ->
-            FilledTonalButton(onClick = { onSuggestion(suggestion) }, modifier = Modifier.fillMaxWidth()) {
-                Text(suggestion)
-            }
-        }
-    }
+private fun Avatar() {
+    Box(
+        Modifier.size(30.dp).clip(CircleShape).background(SentinelBrushes.Header),
+        contentAlignment = Alignment.Center,
+    ) { Icon(SentinelIcons.Shield, null, tint = SentinelColors.White, modifier = Modifier.size(16.dp)) }
 }
 
 @Composable
 private fun Bubble(line: ChatLine) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (line.fromUser) Arrangement.End else Arrangement.Start) {
-        Text(
-            line.text,
-            modifier = Modifier
-                .widthIn(max = 320.dp)
-                .background(
-                    if (line.fromUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    RoundedCornerShape(14.dp),
+    if (line.fromUser) {
+        Row(Modifier.fillMaxWidth().padding(start = 64.dp, end = 14.dp), horizontalArrangement = Arrangement.End) {
+            Text(
+                line.text,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp))
+                    .background(SentinelBrushes.Outgoing)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                color = SentinelColors.White,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+        }
+    } else {
+        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 36.dp), verticalAlignment = Alignment.Bottom) {
+            Avatar()
+            Spacer(Modifier.width(8.dp))
+            SelectionContainer {
+                Text(
+                    line.text,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.bodyLarge,
                 )
-                .padding(12.dp),
-            color = if (line.fromUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.bodyLarge,
-        )
+            }
+        }
     }
 }
+
+@Composable
+private fun Thinking(status: String) {
+    Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 36.dp), verticalAlignment = Alignment.Bottom) {
+        Avatar()
+        Spacer(Modifier.width(8.dp))
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainer)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TypingDots()
+            Spacer(Modifier.width(12.dp))
+            Text(status, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun Composer(draft: String, onDraft: (String) -> Unit, busy: Boolean, onSend: () -> Unit, onTalk: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(start = 14.dp, end = 10.dp, top = 6.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextField(
+            value = draft,
+            onValueChange = onDraft,
+            modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+            placeholder = { Text("Message Sentinel") },
+            shape = RoundedCornerShape(28.dp),
+            maxLines = 5,
+            textStyle = MaterialTheme.typography.bodyLarge,
+            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { onSend() }),
+            colors = TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                focusedIndicatorColor = Color.Transparent,
+                unfocusedIndicatorColor = Color.Transparent,
+            ),
+        )
+        Spacer(Modifier.width(10.dp))
+        if (draft.isBlank()) MicButton(busy = busy, onClick = onTalk) else SendButton(onSend)
+    }
+}
+
+// ---------------------------------------------------------------- Tracker
 
 @Composable
 private fun TrackerTab(refreshKey: Int) {
     val tracker = LocalContext.current.app.tracker
     var version by remember { mutableIntStateOf(0) }
-    val items = remember(refreshKey, version) {
-        tracker.all().sortedWith(compareBy<TrackerItem> { it.done }.thenBy(nullsLast()) { it.dueDateTime() })
+    val all = remember(refreshKey, version) {
+        tracker.all().sortedWith(compareBy(nullsLast()) { it.dueDateTime() })
     }
+    val open = all.filter { !it.done }
+    val done = all.filter { it.done }
+    val today = LocalDate.now()
+    val overdue = open.count { d -> d.dueDate()?.isBefore(today) == true }
+    val thisWeek = open.count { d -> d.dueDate()?.let { !it.isBefore(today) && !it.isAfter(today.plusDays(7)) } == true }
 
-    if (items.isEmpty()) {
-        Text(
-            "Nothing tracked yet. Tell Sentinel about any appointment, deadline, claim or letter " +
-                "and it will save it here and remind you ahead of time.",
-            modifier = Modifier.padding(24.dp),
-            style = MaterialTheme.typography.bodyLarge,
-        )
-        return
-    }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-        items(items, key = { it.id }) { item ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        item.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = if (item.done) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(dueLabel(item), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
-                    if (item.notes.isNotBlank()) Text(item.notes, style = MaterialTheme.typography.bodySmall)
-                }
-                IconButton(onClick = { tracker.update(item.id) { it.copy(done = !it.done) }; version++ }) {
-                    Icon(
-                        Icons.Filled.Check,
-                        if (item.done) "Reopen" else "Mark done",
-                        tint = if (item.done) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline,
-                    )
-                }
-                IconButton(onClick = { tracker.delete(item.id); version++ }) {
-                    Icon(Icons.Filled.Delete, "Delete")
-                }
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "header") {
+            GradientHeader(
+                eyebrow = "Tracker",
+                title = if (open.isEmpty()) "All clear" else "${open.size} on your list",
+                subtitle = buildList {
+                    if (overdue > 0) add("$overdue overdue")
+                    if (thisWeek > 0) add("$thisWeek due this week")
+                    if (isEmpty()) add("Deadlines, appointments, claims and benefits")
+                }.joinToString(" · "),
+            )
+        }
+        if (all.isEmpty()) {
+            item(key = "empty") {
+                EmptyState(
+                    SentinelIcons.Tasks,
+                    "Nothing tracked yet",
+                    "Tell Sentinel about any appointment, deadline, claim or letter. It saves it here and reminds you ahead of time.",
+                )
             }
-            HorizontalDivider()
+        }
+        if (open.isNotEmpty()) item(key = "open") { SectionTitle("Coming up", Modifier.padding(horizontal = 16.dp)) }
+        items(open, key = { it.id }) { item ->
+            TrackerCard(item, onToggle = { tracker.update(item.id) { it.copy(done = true) }; version++ }, onDelete = { tracker.delete(item.id); version++ })
+        }
+        if (done.isNotEmpty()) item(key = "done") { SectionTitle("Done", Modifier.padding(horizontal = 16.dp)) }
+        items(done, key = { it.id }) { item ->
+            TrackerCard(item, onToggle = { tracker.update(item.id) { it.copy(done = false) }; version++ }, onDelete = { tracker.delete(item.id); version++ })
         }
     }
 }
 
-private fun dueLabel(item: TrackerItem): String {
-    val category = item.category.replaceFirstChar { it.uppercase() }
-    if (item.done) return "$category · done"
-    val date = item.dueDate() ?: return category
-    val days = ChronoUnit.DAYS.between(LocalDate.now(), date)
-    val relative = when {
-        days < 0 -> "OVERDUE by ${-days} day(s)"
-        days == 0L -> "due TODAY"
-        days == 1L -> "due tomorrow"
-        else -> "due in $days days"
+@Composable
+private fun TrackerCard(item: TrackerItem, onToggle: () -> Unit, onDelete: () -> Unit) {
+    SentinelCard(Modifier.padding(horizontal = 16.dp), padding = 14.dp) {
+        Row(verticalAlignment = Alignment.Top) {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .then(
+                        if (item.done) Modifier.background(SentinelBrushes.Go)
+                        else Modifier.border(2.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                    )
+                    .clickable(role = Role.Checkbox, onClickLabel = if (item.done) "Reopen" else "Mark done", onClick = onToggle),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (item.done) Icon(Icons.Filled.Check, "Done", tint = SentinelColors.White, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (item.done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    textDecoration = if (item.done) TextDecoration.LineThrough else null,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Pill(
+                        item.category.replaceFirstChar { it.uppercase() },
+                        MaterialTheme.colorScheme.surfaceContainerHighest,
+                        MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    DuePill(item)
+                }
+                if (item.notes.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(item.notes, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4)
+                }
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Filled.Delete, "Delete", tint = MaterialTheme.colorScheme.outline)
+            }
+        }
     }
-    return "$category · ${item.due} · $relative"
 }
+
+@Composable
+private fun DuePill(item: TrackerItem) {
+    val due = item.dueDateTime() ?: return
+    val days = ChronoUnit.DAYS.between(LocalDate.now(), due.toLocalDate())
+    val time = if (item.due?.contains('T') == true) " " + due.format(DateTimeFormatter.ofPattern("h:mm a", Locale.US)) else ""
+    val scheme = MaterialTheme.colorScheme
+    val (text, container, content) = when {
+        item.done -> Triple(due.format(DateTimeFormatter.ofPattern("MMM d", Locale.US)), scheme.surfaceContainerHighest, scheme.onSurfaceVariant)
+        days < 0 -> Triple("Overdue ${-days}d", scheme.errorContainer, scheme.onErrorContainer)
+        days == 0L -> Triple("Today$time", scheme.secondaryContainer, scheme.onSecondaryContainer)
+        days == 1L -> Triple("Tomorrow$time", scheme.secondaryContainer, scheme.onSecondaryContainer)
+        else -> Triple("In $days days · " + due.format(DateTimeFormatter.ofPattern("MMM d", Locale.US)), scheme.primaryContainer, scheme.onPrimaryContainer)
+    }
+    Pill(text, container, content)
+}
+
+// ---------------------------------------------------------------- Setup
 
 @Composable
 private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
@@ -345,159 +492,173 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
     var habitLearning by remember { mutableStateOf(settings.habitLearning) }
     var learnFromTexts by remember { mutableStateOf(settings.learnFromTexts) }
     var readChatsOnScreen by remember { mutableStateOf(settings.readChatsOnScreen) }
-    var saved by remember { mutableStateOf(false) }
 
     val status = remember(refreshKey) { PermissionStatus.read(context) }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Section("1. Claude API key")
-        Text(
-            "Create a key at console.anthropic.com (Settings → API keys) and paste it here. " +
-                "Usage is billed to that account; set a monthly spend limit there.",
-            style = MaterialTheme.typography.bodyMedium,
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        GradientHeader(
+            eyebrow = "Setup",
+            title = "Make Sentinel yours",
+            subtitle = if (apiKey.isBlank()) "Start by adding your Claude API key" else "${status.grantedCount} of 5 permissions on · changes save automatically",
         )
-        OutlinedButton(onClick = { actions.openUrl("https://console.anthropic.com/settings/keys") }) {
-            Text("Open the Claude Console")
-        }
-        OutlinedTextField(
-            value = apiKey, onValueChange = { apiKey = it; saved = false },
-            label = { Text("API key") }, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
-        )
-        OutlinedTextField(
-            value = model, onValueChange = { model = it; saved = false },
-            label = { Text("Model") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-            supportingText = { Text("claude-opus-5-5 is the default. claude-haiku-5-5 costs far less but is less capable.") },
-        )
-
-        Section("2. About you")
-        OutlinedTextField(
-            value = aboutMe, onValueChange = { aboutMe = it; saved = false },
-            label = { Text("Anything Sentinel should always know") },
-            placeholder = { Text("State, injury level and date, insurance, veteran status, who helps you, what's hardest right now…") },
-            modifier = Modifier.fillMaxWidth(), minLines = 4,
-        )
-
-        Section("3. Behavior")
-        ToggleRow("Read replies out loud", speak) { speak = it; saved = false }
-        ToggleRow("Always-on mode (persistent Talk notification)", alwaysOn) { alwaysOn = it; saved = false }
-        ToggleRow("Review all notifications, not only benefit/health/money ones", reviewAll) { reviewAll = it; saved = false }
-        ToggleRow("Brief me when I wake up and pick up my phone", wakeBriefing) { wakeBriefing = it; saved = false }
-        ToggleRow("Learn my habits and coach me (needs Usage access)", habitLearning) { habitLearning = it; saved = false }
-        ToggleRow("Learn about me from my texts (needs Text messages permission)", learnFromTexts) {
-            learnFromTexts = it; saved = false
-        }
-        if (learnFromTexts) {
-            ToggleRow("Also read Google Messages chats I open, including RCS (needs Screen control)", readChatsOnScreen) {
-                readChatsOnScreen = it; saved = false
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            SentinelCard {
+                CardTitle(SentinelIcons.Key, "Claude connection")
+                SoftTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it; settings.apiKey = it },
+                    label = "API key",
+                    visualTransformation = PasswordVisualTransformation(),
+                    supporting = "From console.anthropic.com → Settings → API keys. Usage is billed there; set a monthly limit.",
+                )
+                Spacer(Modifier.height(12.dp))
+                SoftTextField(
+                    value = model,
+                    onValueChange = { model = it; settings.model = it },
+                    label = "Model",
+                    supporting = "claude-opus-5-5 is the default. claude-haiku-5-5 costs far less but is less capable.",
+                )
+                Spacer(Modifier.height(12.dp))
+                SoftButton("Get an API key", { actions.openUrl("https://console.anthropic.com/settings/keys") }, icon = SentinelIcons.Key)
             }
-        }
-        OutlinedTextField(
-            value = briefingHour, onValueChange = { briefingHour = it.filter(Char::isDigit).take(2); saved = false },
-            label = {
+
+            SentinelCard {
+                CardTitle(SentinelIcons.Person, "About you")
+                SoftTextField(
+                    value = aboutMe,
+                    onValueChange = { aboutMe = it; settings.aboutMe = it },
+                    label = "Anything Sentinel should always know",
+                    placeholder = "State, injury level and date, insurance, veteran status, who helps you, what's hardest right now…",
+                    singleLine = false,
+                    minLines = 4,
+                )
+            }
+
+            SentinelCard {
+                CardTitle(SentinelIcons.Sun, "Briefings")
+                SettingSwitch("Brief me when I wake up", "Sent the moment you start using your phone after sleeping", wakeBriefing) {
+                    wakeBriefing = it; settings.wakeBriefing = it
+                }
+                Spacer(Modifier.height(8.dp))
+                SoftTextField(
+                    value = briefingHour,
+                    onValueChange = { v ->
+                        briefingHour = v.filter(Char::isDigit).take(2)
+                        settings.briefingHour = briefingHour.toIntOrNull()?.coerceIn(0, 23) ?: -1
+                    },
+                    label = if (wakeBriefing) "Brief me by this hour if I haven't woken (0–23)" else "Daily briefing hour (0–23, blank = off)",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    supporting = if (wakeBriefing) "Once Sentinel learns when you usually get up, it adjusts this itself." else null,
+                )
+            }
+
+            SentinelCard {
+                CardTitle(SentinelIcons.Insights, "Learning")
+                SettingSwitch("Learn my habits and coach me", "Sleep, wake-up time and phone use. Needs Usage access.", habitLearning) {
+                    habitLearning = it; settings.habitLearning = it
+                }
+                RowDivider()
+                SettingSwitch("Learn about me from my texts", "SMS history and incoming messages, once a day", learnFromTexts) {
+                    learnFromTexts = it; settings.learnFromTexts = it
+                }
+                if (learnFromTexts) {
+                    RowDivider()
+                    SettingSwitch("Read Google Messages chats I open", "Both sides, including RCS. Needs Screen control.", readChatsOnScreen) {
+                        readChatsOnScreen = it; settings.readChatsOnScreen = it
+                    }
+                }
+                RowDivider()
+                SettingSwitch("Review every notification", "Otherwise only benefit, health and money ones", reviewAll) {
+                    reviewAll = it; settings.reviewAllNotifications = it
+                }
+            }
+
+            SentinelCard {
+                CardTitle(SentinelIcons.Mic, "Voice & always-on")
+                SettingSwitch("Read replies out loud", null, speak) { speak = it; settings.speakReplies = it }
+                RowDivider()
+                SettingSwitch("Always-on", "Keeps a Talk button in your notifications and catches the moment you wake", alwaysOn) {
+                    alwaysOn = it
+                    settings.alwaysOn = it
+                    if (it) AgentService.start(context) else AgentService.stop(context)
+                }
+            }
+
+            SentinelCard {
+                CardTitle(SentinelIcons.Lock, "Permissions")
                 Text(
-                    if (wakeBriefing) "If no wake-up is noticed, brief me by this hour (0-23)"
-                    else "Daily briefing hour (0-23, blank = off)"
+                    "If Android says a setting is restricted, tap App info → ⋮ (top right) → Allow restricted settings, then try again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            },
-            supportingText = {
-                if (wakeBriefing) Text("Once Sentinel learns when you usually get up, it adjusts this on its own.")
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
-            modifier = Modifier.fillMaxWidth(),
-        )
+                Spacer(Modifier.height(8.dp))
+                PermissionItem("Phone basics", "Notifications, mic, contacts, calls, texts, calendar", status.runtime, actions::requestPermissions)
+                RowDivider()
+                PermissionItem("Notification access", "Spots deadlines and learns from messages", status.notificationAccess, actions::openNotificationAccess)
+                RowDivider()
+                PermissionItem("Screen control", "Operates apps for you; reads RCS chats you open", status.accessibility, actions::openAccessibility)
+                RowDivider()
+                PermissionItem("Usage access", "Sleep, wake-up time and habit learning", status.usageAccess, actions::openUsageAccess)
+                RowDivider()
+                PermissionItem("No battery limits", "Keeps the watch running in the background", status.batteryExempt, actions::requestBatteryExemption)
+                Spacer(Modifier.height(12.dp))
+                SoftButton("App info", actions::openAppInfo, icon = Icons.Filled.Settings)
+            }
 
-        Button(
-            onClick = {
-                settings.apiKey = apiKey
-                settings.model = model
-                settings.aboutMe = aboutMe
-                settings.speakReplies = speak
-                settings.alwaysOn = alwaysOn
-                settings.reviewAllNotifications = reviewAll
-                settings.briefingHour = briefingHour.toIntOrNull()?.coerceIn(0, 23) ?: -1
-                settings.wakeBriefing = wakeBriefing
-                settings.habitLearning = habitLearning
-                settings.learnFromTexts = learnFromTexts
-                settings.readChatsOnScreen = readChatsOnScreen
-                if (alwaysOn) AgentService.start(context) else AgentService.stop(context)
-                saved = true
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = if (saved) {
-                ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondary,
-                    contentColor = MaterialTheme.colorScheme.onSecondary,
+            SentinelCard {
+                CardTitle(SentinelIcons.Bolt, "Quick access")
+                Text(
+                    "Swipe down twice, tap the pencil, and drag the \"Ask Sentinel\" tile into Quick Settings to talk from anywhere.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            } else ButtonDefaults.buttonColors(),
-        ) { Text(if (saved) "Saved ✓" else "Save settings") }
-
-        Section("4. Permissions")
-        Text(
-            "Sentinel was installed outside the Play Store, so for the two \"special access\" items " +
-                "Android may first say the setting is restricted. If so: tap \"App info\", then the ⋮ menu " +
-                "at the top right, then \"Allow restricted settings\", and try again.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        PermissionRow("Notifications, microphone, contacts, calls, sending and reading texts, calendar", status.runtime) {
-            actions.requestPermissions()
+                Spacer(Modifier.height(12.dp))
+                SoftButton("Run a check now", { SentinelWorker.runNow(context) }, icon = SentinelIcons.Shield)
+            }
+            Spacer(Modifier.height(8.dp))
         }
-        PermissionRow("Notification access (lets the sentinel spot deadlines)", status.notificationAccess) {
-            actions.openNotificationAccess()
-        }
-        PermissionRow("Screen control (Accessibility → Sentinel; also reads RCS chats you open)", status.accessibility) {
-            actions.openAccessibility()
-        }
-        PermissionRow("Usage access (sleep, wake-up time and habit learning)", status.usageAccess) {
-            actions.openUsageAccess()
-        }
-        PermissionRow("Run in background without battery limits", status.batteryExempt) {
-            actions.requestBatteryExemption()
-        }
-        OutlinedButton(onClick = actions::openAppInfo, modifier = Modifier.fillMaxWidth()) { Text("App info") }
-
-        Section("5. Quick access")
-        Text(
-            "Swipe down twice from the top of the screen, tap the pencil (edit), and drag the " +
-                "\"Ask Sentinel\" tile into your Quick Settings to start talking from anywhere.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        OutlinedButton(onClick = { SentinelWorker.runNow(context) }, modifier = Modifier.fillMaxWidth()) {
-            Text("Run a sentinel check now")
-        }
-        Spacer(Modifier.height(24.dp))
     }
 }
 
 @Composable
-private fun Section(title: String) {
-    Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-}
-
-@Composable
-private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        Switch(checked = checked, onCheckedChange = onChange)
+private fun CardTitle(icon: ImageVector, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
+        IconBadge(icon, size = 36.dp)
+        Spacer(Modifier.width(12.dp))
+        Text(text, style = MaterialTheme.typography.titleLarge)
     }
 }
 
 @Composable
-private fun PermissionRow(label: String, granted: Boolean, onFix: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            if (granted) "✓" else "✗",
-            color = if (granted) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(Modifier.size(8.dp))
-        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-        if (!granted) Button(onClick = onFix) { Text("Turn on") }
+private fun PermissionItem(title: String, detail: String, granted: Boolean, onFix: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .then(if (granted) Modifier.background(SentinelBrushes.Go) else Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (granted) Icons.Filled.Check else SentinelIcons.Lock,
+                null,
+                tint = if (granted) SentinelColors.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (granted) {
+            Pill("On", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+        } else {
+            SoftButton("Turn on", onFix, modifier = Modifier.widthIn(min = 96.dp))
+        }
     }
 }
 
@@ -508,6 +669,8 @@ private data class PermissionStatus(
     val batteryExempt: Boolean,
     val usageAccess: Boolean,
 ) {
+    val grantedCount: Int get() = listOf(runtime, notificationAccess, accessibility, batteryExempt, usageAccess).count { it }
+
     companion object {
         fun read(context: Context): PermissionStatus {
             val runtime = MainActivity.RUNTIME_PERMISSIONS

@@ -4,6 +4,7 @@
     <color name="sentinel_blue_deep">#0D3B7A</color>
     <color name="sentinel_green">#2EAD4B</color>
     <color name="sentinel_white">#FFFFFF</color>
+    <color name="sentinel_background">#F4F7FC</color>
     <color name="sentinel_black">#000000</color>
     <color name="launcher_background">#1565C0</color>
 </resources>

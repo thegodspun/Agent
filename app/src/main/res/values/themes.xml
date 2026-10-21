@@ -1,6 +1,6 @@
 <resources>
     <style name="Theme.Sentinel" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:windowBackground">@color/sentinel_white</item>
+        <item name="android:windowBackground">@color/sentinel_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:colorAccent">@color/sentinel_blue</item>
