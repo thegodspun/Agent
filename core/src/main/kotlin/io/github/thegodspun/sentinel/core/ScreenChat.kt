@@ -103,13 +103,12 @@ class SeenStore(private val file: File, private val max: Int = 5_000) {
         val set = load()
         if (!set.add(key.hashCode())) return false
         while (set.size > max) set.remove(set.first())
-        file.parentFile?.mkdirs()
-        file.writeText(json.encodeToString(set.toList()))
+        writeAtomically(file, json.encodeToString(set.toList()))
         true
     }
 
     private fun load(): LinkedHashSet<Int> = cache ?: LinkedHashSet<Int>().also { set ->
-        if (file.exists()) set.addAll(json.decodeFromString<List<Int>>(file.readText()))
+        set.addAll(readOrQuarantine(file, emptyList<Int>()) { json.decodeFromString<List<Int>>(it) })
         cache = set
     }
 }

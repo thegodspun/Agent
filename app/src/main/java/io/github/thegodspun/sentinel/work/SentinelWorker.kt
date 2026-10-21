@@ -46,8 +46,9 @@ class SentinelWorker(context: Context, params: WorkerParameters) : CoroutineWork
         sendReminders()
         if (app.settings.apiKey.isBlank()) return@withLock Result.success()
         try {
-            reviewInbox()
+            // The briefing goes first so it can include what came in overnight.
             Briefing.deliverIfDue(applicationContext)
+            if (!Briefing.holdingForBriefing(applicationContext)) reviewInbox()
             ContextLearner.runIfDue(applicationContext)
             Result.success()
         } catch (e: Exception) {

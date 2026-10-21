@@ -55,6 +55,13 @@ object UsageCollector {
         return UsageAnalyzer.latestSleep(events(context, now - DAY - DAY / 4, now), now, minAsleepMillis)
     }
 
+    /** Screen-on time since [from], from usage history. */
+    fun screenOnMillisSince(context: Context, from: Long): Long {
+        if (!hasAccess(context)) return 0
+        val now = System.currentTimeMillis()
+        return UsageAnalyzer.screenOnMillis(events(context, from - DAY / 4, now), from, now)
+    }
+
     fun settingsIntent() = Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS)
 
     private fun events(context: Context, from: Long, to: Long): List<UsageEvent> {

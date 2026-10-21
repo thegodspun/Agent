@@ -34,12 +34,9 @@ class InboxStore(private val file: File, private val maxItems: Int = 200) {
     fun drop(count: Int) = synchronized(lock) { write(read().drop(count)) }
 
     private fun read(): List<CapturedNotification> =
-        if (file.exists()) json.decodeFromString(file.readText()) else emptyList()
+        readOrQuarantine(file, emptyList()) { json.decodeFromString(it) }
 
-    private fun write(items: List<CapturedNotification>) {
-        file.parentFile?.mkdirs()
-        file.writeText(json.encodeToString(items))
-    }
+    private fun write(items: List<CapturedNotification>) = writeAtomically(file, json.encodeToString(items))
 }
 
 /**

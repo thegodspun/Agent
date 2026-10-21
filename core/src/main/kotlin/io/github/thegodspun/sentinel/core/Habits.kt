@@ -63,6 +63,9 @@ class HabitStore(private val file: File, private val keepDays: Int = 90, private
         val byDate = read().days.associateBy { it.date }.toMutableMap()
         summaries.forEach { new ->
             val old = byDate[new.date]
+            val hasData = new.screenMinutes > 0 || new.unlocks > 0 || new.wakeTime != null
+            // Days before Sentinel (or the phone) was in use have no events; don't record them as idle days.
+            if (old == null && !hasData) return@forEach
             if (old == null || new.screenMinutes > 0 || new.wakeTime != null) {
                 // Keep a sleep estimate the new data can no longer see (events expire after a few days).
                 byDate[new.date] = if (new.wakeTime == null && old?.wakeTime != null) {
@@ -95,17 +98,9 @@ class HabitStore(private val file: File, private val keepDays: Int = 90, private
 
     private fun update(transform: (HabitData) -> HabitData) = synchronized(lock) { write(transform(read())) }
 
-    private fun read(): HabitData = if (file.exists()) json.decodeFromString(file.readText()) else HabitData()
+    private fun read(): HabitData = readOrQuarantine(file, HabitData()) { json.decodeFromString(it) }
 
-    private fun write(data: HabitData) {
-        file.parentFile?.mkdirs()
-        val tmp = File(file.path + ".tmp")
-        tmp.writeText(json.encodeToString(data))
-        if (!tmp.renameTo(file)) {
-            file.writeText(tmp.readText())
-            tmp.delete()
-        }
-    }
+    private fun write(data: HabitData) = writeAtomically(file, json.encodeToString(data))
 }
 
 data class Interval(val start: Long, val end: Long) {
@@ -169,6 +164,10 @@ object UsageAnalyzer {
         return blocks.filter { it.asleepMillis >= minAsleepMillis }
     }
 
+    /** Total time the screen has been on between [from] and [now]. */
+    fun screenOnMillis(events: List<UsageEvent>, from: Long, now: Long): Long =
+        screenSessions(events, now).sumOf { it.overlap(from, now) }
+
     /** The most recent finished sleep block in the last day, if any. */
     fun latestSleep(events: List<UsageEvent>, now: Long, minAsleepMillis: Long = 3 * HOUR): SleepBlock? =
         sleepBlocks(screenSessions(events, now), now - 24 * HOUR, now, minAsleepMillis).lastOrNull()
@@ -204,7 +203,7 @@ object UsageAnalyzer {
 
         // Last night: the longest sleep block that ended this day, looking back to 6 p.m.
         val night = sleepBlocks(sessions, dayStart - 6 * HOUR, dayEnd, 3 * HOUR)
-            .filter { it.end in dayStart until dayEnd }
+            .filter { it.end in dayStart until dayEnd && WakePolicy.isNightSleep(it.start, it.end, zone) }
             .maxByOrNull { it.asleepMillis }
         val firstApp = night?.let { n ->
             sorted.firstOrNull {
@@ -275,10 +274,19 @@ object HabitProfile {
 
     fun describe(data: HabitData, today: LocalDate): String {
         val week = recent(data, today, 8).filter { it.date != today.toString() }
-        if (week.isEmpty() && data.goals.isEmpty() && data.insights.isEmpty()) {
+        val lastNight = data.days.firstOrNull { it.date == today.toString() && it.wakeTime != null }
+        if (week.isEmpty() && lastNight == null && data.goals.isEmpty() && data.insights.isEmpty()) {
             return "No habit data yet (it builds up over the first few days, and needs Usage access turned on)."
         }
         return buildString {
+            if (lastNight?.bedtime != null && lastNight.wakeTime != null) {
+                append("Last night (ended this morning): screen off ${shortTime(lastNight.bedtime)} → first use ${shortTime(lastNight.wakeTime)}")
+                lastNight.sleepMinutes?.let { append(", about ${hours(it.toDouble())} with the screen off") }
+                if (lastNight.nightPickups > 0) append(", ${lastNight.nightPickups} phone checks during the night")
+                if (lastNight.lateNightMinutes > 0) append(", ${lastNight.lateNightMinutes} min of use between midnight and 5 a.m.")
+                lastNight.firstAppAfterWaking?.let { append(", first app after waking: $it") }
+                append(".\n")
+            }
             val wake = typicalWakeMinutes(data, today)
             val bed = typicalBedtimeMinutes(data, today)
             val sleeps = recent(data, today, 14).mapNotNull { it.sleepMinutes }
@@ -303,7 +311,7 @@ object HabitProfile {
                     append("Most-used apps (avg min/day): ")
                     append(apps.joinToString { "${it.key} ${it.value}" }).append(".\n")
                 }
-                append("Day by day (date: screen-off night → first use, screen time, late-night min, unlocks, top app):\n")
+                append("Day by day (date: the night ending that morning, screen off → first use; then that day's screen time, late-night min, unlocks, top app):\n")
                 week.forEach { d ->
                     append("- ${d.date}: ")
                     if (d.bedtime != null && d.wakeTime != null) {
@@ -396,13 +404,46 @@ fun habitTools(habits: HabitStore, clock: () -> LocalDateTime): List<AgentTool> 
 /** Decides whether an unlock looks like the start of the user's day. */
 object WakePolicy {
     const val MIN_GAP_TO_CHECK_MILLIS = 20 * 60_000L
-    const val MIN_HOURS_BETWEEN_BRIEFINGS = 10L
+
+    /** A wake-up candidate stays valid this long if the screen times out before it's confirmed. */
+    const val CANDIDATE_TTL_MILLIS = 30 * 60_000L
+
+    /** Each "wake-day" runs from 4 a.m. to 4 a.m., and gets at most one briefing. */
+    private const val DAY_STARTS_AT_HOUR = 4
+
+    fun wakeDayStart(now: LocalDateTime): LocalDateTime {
+        val today = now.toLocalDate().atTime(DAY_STARTS_AT_HOUR, 0)
+        return if (now.hour < DAY_STARTS_AT_HOUR) today.minusDays(1) else today
+    }
+
+    fun briefedThisWakeDay(lastBriefingAt: Long, now: Long, zone: ZoneId): Boolean {
+        if (lastBriefingAt <= 0) return false
+        val start = wakeDayStart(LocalDateTime.ofInstant(Instant.ofEpochMilli(now), zone))
+        return lastBriefingAt >= start.atZone(zone).toInstant().toEpochMilli()
+    }
+
+    /**
+     * Whether a dark-screen stretch looks like a night's sleep rather than an afternoon or
+     * evening away from the phone: it has to cover at least an hour between 1 and 7 a.m.
+     */
+    fun isNightSleep(start: Long, end: Long, zone: ZoneId): Boolean {
+        if (end <= start) return false
+        var day = LocalDateTime.ofInstant(Instant.ofEpochMilli(start), zone).toLocalDate()
+        val lastDay = LocalDateTime.ofInstant(Instant.ofEpochMilli(end), zone).toLocalDate()
+        while (!day.isAfter(lastDay)) {
+            val windowStart = day.atTime(1, 0).atZone(zone).toInstant().toEpochMilli()
+            val windowEnd = day.atTime(7, 0).atZone(zone).toInstant().toEpochMilli()
+            if (Interval(start, end).overlap(windowStart, windowEnd) >= 60 * 60_000L) return true
+            day = day.plusDays(1)
+        }
+        return false
+    }
 
     /** A cheap first test run on every unlock; the full check happens a little later. */
-    fun worthChecking(now: Long, lastScreenOff: Long, lastBriefingAt: Long): Boolean =
+    fun worthChecking(now: Long, lastScreenOff: Long, lastBriefingAt: Long, zone: ZoneId): Boolean =
         lastScreenOff > 0 &&
             now - lastScreenOff >= MIN_GAP_TO_CHECK_MILLIS &&
-            now - lastBriefingAt >= MIN_HOURS_BETWEEN_BRIEFINGS * 3_600_000L
+            !briefedThisWakeDay(lastBriefingAt, now, zone)
 
     /**
      * How long to wait before confirming the user is really up. In the middle of the night
@@ -418,4 +459,11 @@ object WakePolicy {
         }
         return if (night) 10 * 60_000L else 90_000L
     }
+
+    /**
+     * The fallback briefing (when no wake-up was caught) may go out from [fallbackMinutes]
+     * for eight hours, never late in the evening.
+     */
+    fun inFallbackWindow(localMinutes: Int, fallbackMinutes: Int): Boolean =
+        localMinutes >= fallbackMinutes && localMinutes < minOf(fallbackMinutes + 8 * 60, 21 * 60)
 }

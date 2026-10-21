@@ -46,3 +46,9 @@ class SentinelApp : Application() {
 }
 
 val android.content.Context.app: SentinelApp get() = applicationContext as SentinelApp
+
+/** Whether Sentinel's screen is showing, which decides if it may open other apps directly. */
+object AppVisibility {
+    @Volatile
+    var visible = false
+}

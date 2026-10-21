@@ -6,6 +6,7 @@ import android.content.Context
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import android.util.Log
 import io.github.thegodspun.sentinel.app
 import io.github.thegodspun.sentinel.core.CapturedNotification
 import io.github.thegodspun.sentinel.core.MESSAGING_APPS
@@ -23,6 +24,15 @@ import java.time.LocalDateTime
 class NotificationWatcher : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        try {
+            capture(sbn)
+        } catch (e: Exception) {
+            // Never let one odd notification or a storage problem take the whole app down.
+            Log.w("NotificationWatcher", "Couldn't process a notification", e)
+        }
+    }
+
+    private fun capture(sbn: StatusBarNotification) {
         if (sbn.packageName == packageName || sbn.isOngoing) return
         val extras = sbn.notification.extras
         if (sbn.notification.flags and Notification.FLAG_GROUP_SUMMARY != 0) return

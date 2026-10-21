@@ -133,18 +133,18 @@ class NotesStore(private val file: File, private val maxFacts: Int = 200) {
         file.parentFile?.mkdirs()
         val clean = fact.replace('\n', ' ').trim()
         val facts = (all().filterNot { it.equals(clean, ignoreCase = true) } + clean).takeLast(maxFacts)
-        file.writeText(facts.joinToString("\n", postfix = "\n"))
+        writeAtomically(file, facts.joinToString("\n", postfix = "\n"))
     }
 
     fun removeExact(fact: String) = synchronized(lock) {
         val kept = all().filterNot { it == fact }
-        file.writeText(kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
+        writeAtomically(file, kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
     }
 
     fun remove(text: String): Int = synchronized(lock) {
         val lines = all()
         val kept = lines.filterNot { it.contains(text, ignoreCase = true) }
-        file.writeText(kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
+        writeAtomically(file, kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
         lines.size - kept.size
     }
 }

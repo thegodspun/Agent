@@ -54,6 +54,16 @@ class MainActivity : ComponentActivity() {
         handleVoiceExtra(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        AppVisibility.visible = true
+    }
+
+    override fun onStop() {
+        AppVisibility.visible = false
+        super.onStop()
+    }
+
     override fun onResume() {
         super.onResume()
         refresh.intValue++

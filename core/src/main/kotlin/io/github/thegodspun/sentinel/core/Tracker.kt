@@ -100,18 +100,9 @@ class TrackerStore(private val file: File) {
         }
     }
 
-    private fun read(): List<TrackerItem> =
-        if (file.exists()) json.decodeFromString(file.readText()) else emptyList()
+    private fun read(): List<TrackerItem> = readOrQuarantine(file, emptyList()) { json.decodeFromString(it) }
 
-    private fun write(items: List<TrackerItem>) {
-        file.parentFile?.mkdirs()
-        val tmp = File(file.path + ".tmp")
-        tmp.writeText(json.encodeToString(items))
-        if (!tmp.renameTo(file)) {
-            file.writeText(tmp.readText())
-            tmp.delete()
-        }
-    }
+    private fun write(items: List<TrackerItem>) = writeAtomically(file, json.encodeToString(items))
 }
 
 /** A reminder that is due to be shown now. */

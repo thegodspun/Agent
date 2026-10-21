@@ -95,6 +95,11 @@ class PhoneControlService : AccessibilityService() {
         return performGlobalAction(action)
     }
 
+    /** Closes the notification shade, e.g. after an action was approved from a notification. */
+    fun dismissShade() {
+        performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+    }
+
     /** Text of everything on screen, one element per line, marking what can be tapped or typed into. */
     fun readScreen(maxLines: Int = 150): String {
         val root = rootInActiveWindow ?: return "The screen can't be read right now."

@@ -69,6 +69,18 @@ class Settings(context: Context) {
         get() = prefs.getLong("last_screen_off", 0)
         set(value) = prefs.edit().putLong("last_screen_off", value).apply()
 
+    /**
+     * An unlock that looked like waking up but couldn't be confirmed (the screen timed out
+     * first): when it happened and when the screen had gone dark before it.
+     */
+    var wakeCandidateAt: Long
+        get() = prefs.getLong("wake_candidate_at", 0)
+        set(value) = prefs.edit().putLong("wake_candidate_at", value).apply()
+
+    var wakeCandidateDarkSince: Long
+        get() = prefs.getLong("wake_candidate_dark_since", 0)
+        set(value) = prefs.edit().putLong("wake_candidate_dark_since", value).apply()
+
     /** Learn habits from app usage, screen time and sleep patterns. */
     var habitLearning: Boolean
         get() = prefs.getBoolean("habit_learning", true)

@@ -118,12 +118,55 @@ class HabitsTest {
     fun `wake policy`() {
         val now = LocalDateTime.of(2026, 10, 21, 7, 30).atZone(zone).toInstant().toEpochMilli()
         val hour = 3_600_000L
-        assertTrue(WakePolicy.worthChecking(now, lastScreenOff = now - 6 * hour, lastBriefingAt = now - 24 * hour))
-        assertTrue(!WakePolicy.worthChecking(now, lastScreenOff = now - 5 * 60_000, lastBriefingAt = 0))
-        assertTrue(!WakePolicy.worthChecking(now, lastScreenOff = now - 6 * hour, lastBriefingAt = now - 2 * hour))
+        assertTrue(WakePolicy.worthChecking(now, lastScreenOff = now - 6 * hour, lastBriefingAt = now - 24 * hour, zone = zone))
+        assertTrue(!WakePolicy.worthChecking(now, lastScreenOff = now - 5 * 60_000, lastBriefingAt = 0, zone = zone))
+        assertTrue(!WakePolicy.worthChecking(now, lastScreenOff = now - 6 * hour, lastBriefingAt = now - 2 * hour, zone = zone))
 
         assertEquals(10 * 60_000L, WakePolicy.confirmDelayMillis(3 * 60, typicalWakeMinutes = 7 * 60 + 30))
         assertEquals(90_000L, WakePolicy.confirmDelayMillis(7 * 60, typicalWakeMinutes = 7 * 60 + 30))
         assertEquals(10 * 60_000L, WakePolicy.confirmDelayMillis(2 * 60, typicalWakeMinutes = null))
+    }
+
+    @Test
+    fun `one briefing per wake-day, which starts at 4 a m`() {
+        fun at(d: LocalDate, h: Int, m: Int = 0) = t(d, h, m)
+        // Briefed at 10:30 p.m. yesterday: a 3 a.m. unlock is still yesterday's wake-day...
+        val lateBriefing = at(day.minusDays(1), 22, 30)
+        assertTrue(WakePolicy.briefedThisWakeDay(lateBriefing, at(day, 3), zone))
+        // ...but the 7:30 morning is a new one.
+        assertTrue(!WakePolicy.briefedThisWakeDay(lateBriefing, at(day, 7, 30), zone))
+        assertEquals(LocalDateTime.of(2026, 10, 20, 4, 0), WakePolicy.wakeDayStart(LocalDateTime.of(2026, 10, 21, 2, 0)))
+    }
+
+    @Test
+    fun `only night-time stretches count as sleep`() {
+        assertTrue(WakePolicy.isNightSleep(t(day.minusDays(1), 23), t(day, 7), zone))
+        assertTrue(WakePolicy.isNightSleep(t(day, 4), t(day, 12), zone)) // night owl, 4 a.m. to noon
+        assertTrue(!WakePolicy.isNightSleep(t(day, 17), t(day, 22), zone)) // evening away from the phone
+        assertTrue(!WakePolicy.isNightSleep(t(day, 13), t(day, 17), zone)) // afternoon nap
+        assertTrue(!WakePolicy.isNightSleep(t(day, 6, 30), t(day, 11), zone)) // only 30 min before 7 a.m.
+    }
+
+    @Test
+    fun `fallback briefing stays in the daytime`() {
+        assertTrue(WakePolicy.inFallbackWindow(11 * 60, fallbackMinutes = 10 * 60 + 30))
+        assertTrue(!WakePolicy.inFallbackWindow(23 * 60 + 30, fallbackMinutes = 10 * 60 + 30))
+        assertTrue(!WakePolicy.inFallbackWindow(9 * 60, fallbackMinutes = 10 * 60 + 30))
+        assertTrue(!WakePolicy.inFallbackWindow(21 * 60 + 5, fallbackMinutes = 15 * 60))
+    }
+
+    @Test
+    fun `profile leads with last night and skips empty days`() {
+        val store = HabitStore(File(Files.createTempDirectory("habits").toFile(), "h.json"))
+        store.upsertDays(
+            listOf(
+                DaySummary(day.toString(), 30, 5, 44, bedtime = "2026-10-21T00:40", wakeTime = "2026-10-21T07:30", sleepMinutes = 406, nightPickups = 1, firstAppAfterWaking = "Gmail"),
+                DaySummary(day.minusDays(3).toString(), 0, 0, 0), // no events that day
+            )
+        )
+        assertEquals(1, store.data().days.size)
+        val profile = HabitProfile.describe(store.data(), day)
+        assertTrue(profile.startsWith("Last night (ended this morning): screen off 12:40 AM → first use 7:30 AM"), profile)
+        assertTrue("1 phone checks" in profile && "first app after waking: Gmail" in profile, profile)
     }
 }

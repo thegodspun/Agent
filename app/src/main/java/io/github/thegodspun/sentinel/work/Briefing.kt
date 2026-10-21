@@ -7,6 +7,7 @@ import io.github.thegodspun.sentinel.app
 import io.github.thegodspun.sentinel.core.Conversation
 import io.github.thegodspun.sentinel.core.HabitProfile
 import io.github.thegodspun.sentinel.core.Prompts
+import io.github.thegodspun.sentinel.core.WakePolicy
 import io.github.thegodspun.sentinel.core.coreTools
 import io.github.thegodspun.sentinel.core.describeNow
 import io.github.thegodspun.sentinel.core.habitTools
@@ -41,7 +42,8 @@ object Briefing {
         val startOfDay = today.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val calendar = readCalendar(context, startOfDay, startOfDay + 24 * HOUR, max = 20)
         val habits = app.habits.data()
-        val weekly = settings.habitLearning && habits.days.size >= 5 &&
+        val daysWithData = habits.days.count { it.screenMinutes > 0 || it.wakeTime != null }
+        val weekly = settings.habitLearning && daysWithData >= 5 &&
             (settings.lastWeeklyReview.isBlank() ||
                 ChronoUnit.DAYS.between(LocalDate.parse(settings.lastWeeklyReview), today) >= 7)
 
@@ -75,15 +77,31 @@ object Briefing {
         Notifications.post(context, Notifications.CHANNEL_BRIEFING, BRIEFING_ID, title, text)
     }
 
-    /** True when the screen has been dark for an hour at night, so alerts should wait for the briefing. */
+    /**
+     * True at night when the screen is off and the user hasn't started their day yet, so
+     * alerts should wait for the wake-up briefing.
+     */
     fun userProbablyAsleep(context: Context): Boolean {
         val settings = context.app.settings
         val screenOn = context.getSystemService(PowerManager::class.java).isInteractive
         if (screenOn) return false
-        val darkFor = System.currentTimeMillis() - settings.lastScreenOff
+        val now = System.currentTimeMillis()
         val hour = LocalDateTime.now().hour
         val nightHours = hour >= 22 || hour < 9
-        return nightHours && (settings.lastScreenOff == 0L || darkFor >= HOUR)
+        val darkFor = now - settings.lastScreenOff
+        val startedDay = hour >= 4 && WakePolicy.briefedThisWakeDay(settings.lastBriefingAt, now, ZoneId.systemDefault())
+        return nightHours && !startedDay && (settings.lastScreenOff == 0L || darkFor >= 10 * 60_000L)
+    }
+
+    /**
+     * With wake briefings on, notifications that come in before the day's briefing wait to be
+     * part of it. If no briefing has happened by 9 p.m., they're reviewed on their own.
+     */
+    fun holdingForBriefing(context: Context): Boolean {
+        val settings = context.app.settings
+        val hour = LocalDateTime.now().hour
+        return settings.wakeBriefing && settings.apiKey.isNotBlank() && (hour < 21 && hour >= 4 || userProbablyAsleep(context)) &&
+            !WakePolicy.briefedThisWakeDay(settings.lastBriefingAt, System.currentTimeMillis(), ZoneId.systemDefault())
     }
 
     /**
@@ -96,7 +114,7 @@ object Briefing {
         if (settings.briefingHour < 0 && !settings.wakeBriefing) return
         val nowMillis = System.currentTimeMillis()
         val now = LocalDateTime.now()
-        val sinceLast = nowMillis - settings.lastBriefingAt
+        val zone = ZoneId.systemDefault()
 
         if (!settings.wakeBriefing) {
             val briefedToday = settings.lastBriefingAt > 0 &&
@@ -105,18 +123,27 @@ object Briefing {
             return
         }
 
-        if (sinceLast < 16 * HOUR || userProbablyAsleep(context)) return
+        if (WakePolicy.briefedThisWakeDay(settings.lastBriefingAt, nowMillis, zone)) return
+        val screenOn = context.getSystemService(PowerManager::class.java).isInteractive
+        if (!screenOn) return
+        val typicalWake = HabitProfile.typicalWakeMinutes(context.app.habits.data(), now.toLocalDate())
+
+        // A wake-up the always-on service missed: a night's sleep ended in the last 3 hours, and
+        // the user has been on the phone long enough that it isn't a quick look in the night.
         val minSleep = settings.minSleepHours * HOUR
         val woke = UsageCollector.latestSleep(context, minSleep)
-        if (woke != null && woke.end > settings.lastBriefingAt && nowMillis - woke.end < 3 * HOUR) {
-            deliver(context, justWokeUp = true)
-            return
+        if (woke != null && nowMillis - woke.end < 3 * HOUR && WakePolicy.isNightSleep(woke.start, woke.end, zone)) {
+            val needed = WakePolicy.confirmDelayMillis(UsageCollector.minutesOfDay(woke.end), typicalWake)
+            if (UsageCollector.screenOnMillisSince(context, woke.end) >= needed) {
+                deliver(context, justWokeUp = true)
+                return
+            }
         }
-        // Fallback: three hours after the usual wake time, or the chosen hour until that's learned.
-        val typicalWake = HabitProfile.typicalWakeMinutes(context.app.habits.data(), now.toLocalDate())
-        val fallbackMinutes = typicalWake?.let { minOf(it + 180, 23 * 60) }
+        // Fallback: three hours after the usual wake time, or the chosen hour until that's learned,
+        // and only during the day.
+        val fallbackMinutes = typicalWake?.let { minOf(it + 180, 20 * 60) }
             ?: settings.briefingHour.takeIf { it >= 0 }?.times(60)
             ?: return
-        if (now.hour * 60 + now.minute >= fallbackMinutes) deliver(context, justWokeUp = false)
+        if (WakePolicy.inFallbackWindow(now.hour * 60 + now.minute, fallbackMinutes)) deliver(context, justWokeUp = false)
     }
 }

@@ -16,6 +16,7 @@ import io.github.thegodspun.sentinel.core.Prompts
 import io.github.thegodspun.sentinel.core.coreTools
 import io.github.thegodspun.sentinel.core.describeNow
 import io.github.thegodspun.sentinel.core.habitTools
+import io.github.thegodspun.sentinel.service.ApprovalCenter
 import io.github.thegodspun.sentinel.tools.phoneTools
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,7 +62,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val pending = Confirmation(question, CompletableDeferred())
             _confirmation.value = pending
             return try {
-                pending.answer.await()
+                ApprovalCenter.ask(getApplication(), question, pending.answer)
             } finally {
                 _confirmation.value = null
             }
@@ -69,7 +70,17 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun send(text: String) {
-        if (text.isBlank() || _status.value != null) return
+        if (text.isBlank()) return
+        if (_status.value != null) {
+            // Don't drop a request silently (e.g. a voice request from the Talk button).
+            val waiting = if (_confirmation.value != null) {
+                "I'm waiting for you to allow or decline the action I asked about. Answer that first, then ask again."
+            } else {
+                "I'm still working on your last request. Ask again in a moment."
+            }
+            _lines.update { it + ChatLine(true, text) + ChatLine(false, waiting) }
+            return
+        }
         if (app.settings.apiKey.isBlank()) {
             _lines.update { it + ChatLine(false, "Add your Claude API key in the Setup tab first.") }
             return

@@ -12,6 +12,8 @@ import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.telephony.SmsManager
 import androidx.core.content.ContextCompat
+import io.github.thegodspun.sentinel.AppVisibility
+import io.github.thegodspun.sentinel.Notifications
 import io.github.thegodspun.sentinel.core.AgentTool
 import io.github.thegodspun.sentinel.core.TextFilter
 import io.github.thegodspun.sentinel.core.ToolInput
@@ -34,7 +36,21 @@ fun phoneTools(context: Context): List<AgentTool> {
     fun granted(permission: String) =
         ContextCompat.checkSelfPermission(ctx, permission) == PackageManager.PERMISSION_GRANTED
 
-    fun launch(intent: Intent) = ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    /**
+     * Opens another app's screen. Android blocks that while Sentinel is in the background
+     * (unless screen control is on), so then it posts a tap-to-finish notification instead.
+     * Returns null when the screen opened, or a note for Claude to pass on.
+     */
+    fun launch(intent: Intent, what: String): String? {
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (AppVisibility.visible || PhoneControlService.instance != null) {
+            ctx.startActivity(intent)
+            return null
+        }
+        Notifications.postTapToFinish(ctx, what, intent)
+        return "Android doesn't let Sentinel open other apps while it's in the background, so this isn't done yet. " +
+            "I posted a notification: tap \"$what\" to finish. (Turning on Screen control in Sentinel's Setup removes this step.)"
+    }
 
     fun control(): PhoneControlService = PhoneControlService.instance
         ?: throw IllegalStateException(
@@ -65,7 +81,8 @@ fun phoneTools(context: Context): List<AgentTool> {
                     ?: apps.firstOrNull { it.first.contains(wanted, ignoreCase = true) }
                     ?: return "No installed app called \"$wanted\". Some installed apps: " +
                         apps.map { it.first }.sorted().take(60).joinToString()
-                launch(pm.getLaunchIntentForPackage(match.second) ?: return "Can't open ${match.first}.")
+                launch(pm.getLaunchIntentForPackage(match.second) ?: return "Can't open ${match.first}.", "Open ${match.first}")
+                    ?.let { return it }
                 delay(1500) // let it draw before the agent reads the screen
                 return "Opened ${match.first}."
             }
@@ -108,7 +125,7 @@ fun phoneTools(context: Context): List<AgentTool> {
             override suspend fun run(input: ToolInput): String {
                 val (number, name) = resolveNumber(input.string("to"))
                 val action = if (granted(Manifest.permission.CALL_PHONE)) Intent.ACTION_CALL else Intent.ACTION_DIAL
-                launch(Intent(action, Uri.parse("tel:" + Uri.encode(number))))
+                launch(Intent(action, Uri.parse("tel:" + Uri.encode(number))), "Call $name")?.let { return it }
                 return if (action == Intent.ACTION_CALL) "Calling $name ($number)." else "Opened the dialer for $name ($number)."
             }
         },
@@ -126,7 +143,8 @@ fun phoneTools(context: Context): List<AgentTool> {
                 val (number, name) = resolveNumber(input.string("to"))
                 val message = input.string("message")
                 if (!granted(Manifest.permission.SEND_SMS)) {
-                    launch(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")).putExtra("sms_body", message))
+                    launch(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")).putExtra("sms_body", message), "Text $name")
+                        ?.let { return it }
                     return "Opened Messages with the text ready for $name; the user must press send."
                 }
                 val sms = ctx.getSystemService(SmsManager::class.java)
@@ -148,9 +166,10 @@ fun phoneTools(context: Context): List<AgentTool> {
                         .putExtra(AlarmClock.EXTRA_HOUR, input.intOrNull("hour") ?: error("hour required"))
                         .putExtra(AlarmClock.EXTRA_MINUTES, input.intOrNull("minute") ?: 0)
                         .putExtra(AlarmClock.EXTRA_MESSAGE, input.stringOrNull("label") ?: "Sentinel")
-                        .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-                )
-                return "Alarm set."
+                        .putExtra(AlarmClock.EXTRA_SKIP_UI, true),
+                    "Set the alarm",
+                )?.let { return it }
+                return "Asked the Clock app to set the alarm."
             }
         },
 
@@ -165,9 +184,10 @@ fun phoneTools(context: Context): List<AgentTool> {
                     Intent(AlarmClock.ACTION_SET_TIMER)
                         .putExtra(AlarmClock.EXTRA_LENGTH, input.intOrNull("seconds") ?: error("seconds required"))
                         .putExtra(AlarmClock.EXTRA_MESSAGE, input.stringOrNull("label") ?: "Sentinel")
-                        .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
-                )
-                return "Timer started."
+                        .putExtra(AlarmClock.EXTRA_SKIP_UI, true),
+                    "Start the timer",
+                )?.let { return it }
+                return "Asked the Clock app to start the timer."
             }
         },
 
@@ -204,8 +224,9 @@ fun phoneTools(context: Context): List<AgentTool> {
                         .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, start.atZone(zone).toInstant().toEpochMilli())
                         .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, end.atZone(zone).toInstant().toEpochMilli())
                         .putExtra(CalendarContract.Events.EVENT_LOCATION, input.stringOrNull("location"))
-                        .putExtra(CalendarContract.Events.DESCRIPTION, input.stringOrNull("description"))
-                )
+                        .putExtra(CalendarContract.Events.DESCRIPTION, input.stringOrNull("description")),
+                    "Add \"${input.string("title")}\" to your calendar",
+                )?.let { return it }
                 return "Opened the calendar with the event filled in; the user needs to tap Save."
             }
         },
@@ -219,7 +240,7 @@ fun phoneTools(context: Context): List<AgentTool> {
             override suspend fun run(input: ToolInput): String {
                 val q = Uri.encode(input.string("query"))
                 val uri = if (input.boolOrNull("navigate") == true) "google.navigation:q=$q" else "geo:0,0?q=$q"
-                launch(Intent(Intent.ACTION_VIEW, Uri.parse(uri)))
+                launch(Intent(Intent.ACTION_VIEW, Uri.parse(uri)), "Open Maps")?.let { return it }
                 return "Opened Maps."
             }
         },
@@ -230,7 +251,7 @@ fun phoneTools(context: Context): List<AgentTool> {
             override suspend fun run(input: ToolInput): String {
                 val url = input.string("url")
                 require(url.startsWith("https://") || url.startsWith("http://")) { "Only web addresses can be opened." }
-                launch(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                launch(Intent(Intent.ACTION_VIEW, Uri.parse(url)), "Open $url")?.let { return it }
                 return "Opened $url."
             }
         },
@@ -280,6 +301,9 @@ fun phoneTools(context: Context): List<AgentTool> {
             override val requiresConfirmation = true
             override fun confirmationText(input: ToolInput) = "Tap \"${input.stringOrNull("label")}\" on screen?"
             override suspend fun run(input: ToolInput): String {
+                // If it was approved from the notification, get the shade out of the way first.
+                control().dismissShade()
+                delay(500)
                 val ok = control().tap(input.string("label"))
                 delay(1200)
                 return if (ok) "Tapped. Call read_screen to see the result." else "Couldn't find anything tappable labeled that."

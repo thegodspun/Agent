@@ -148,3 +148,16 @@ class TextsTest {
         assertEquals(listOf("c", "A", "d"), notes.all())
     }
 }
+
+class StorageTest {
+    @Test
+    fun `a damaged file is set aside instead of crashing every read`() {
+        val dir = Files.createTempDirectory("storage").toFile()
+        val file = File(dir, "inbox.json").apply { writeText("[{\"app\":\"Gm") } // cut off mid-write
+        val inbox = InboxStore(file)
+        assertEquals(emptyList(), inbox.all())
+        assertTrue(File(dir, "inbox.json.corrupt").exists())
+        inbox.add(CapturedNotification("Gmail", "SSA", "New letter", "2026-10-21T09:00"))
+        assertEquals(1, InboxStore(file).all().size)
+    }
+}

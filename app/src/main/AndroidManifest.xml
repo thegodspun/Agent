@@ -97,6 +97,10 @@
         </service>
 
         <receiver
+            android:name=".service.ApprovalReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".service.BootReceiver"
             android:exported="true">
             <intent-filter>
