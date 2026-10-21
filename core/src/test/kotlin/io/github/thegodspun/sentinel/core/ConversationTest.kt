@@ -49,6 +49,7 @@ class ConversationTest {
             listOf(
                 message(
                     "tool_use",
+                    text("Next Tuesday is Dec 1."),
                     toolUse("t1", "tracker_add", """{"title":"SSDI appeal","category":"deadline","due":"2026-12-01"}"""),
                     toolUse("t2", "get_current_time", "{}"),
                 ),

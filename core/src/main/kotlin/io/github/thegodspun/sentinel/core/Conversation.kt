@@ -142,6 +142,8 @@ class Conversation(
                     }
                     // Every result goes back in a single message.
                     messages += userMessage(results)
+                    // Text written before a tool call is a working note, not the answer.
+                    replyParts.clear()
                 }
                 // A server tool (web search) paused a long turn; sending again resumes it.
                 stopReason == BetaStopReason.PAUSE_TURN -> Unit
