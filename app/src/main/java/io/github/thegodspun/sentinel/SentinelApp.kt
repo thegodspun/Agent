@@ -40,7 +40,8 @@ class SentinelApp : Application() {
         messages = InboxStore(File(filesDir, "messages.json"), maxItems = 300)
         seenOnScreen = SeenStore(File(filesDir, "seen_on_screen.json"))
         Notifications.createChannels(this)
-        SentinelWorker.schedule(this)
+        // Fails only where WorkManager isn't set up, such as screenshot tests.
+        runCatching { SentinelWorker.schedule(this) }
         if (settings.alwaysOn) AgentService.start(this)
     }
 }

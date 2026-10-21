@@ -2,6 +2,7 @@ package io.github.thegodspun.sentinel.ui
 
 import android.app.Application
 import android.speech.tts.TextToSpeech
+import androidx.annotation.VisibleForTesting
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.anthropic.errors.AnthropicIoException
@@ -27,7 +28,9 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalDateTime
 
-data class ChatLine(val fromUser: Boolean, val text: String)
+data class ChatLine(val fromUser: Boolean, val text: String, val id: Long = nextLineId++)
+
+private var nextLineId = 0L
 
 /** A pending "Allow this?" question from a tool that acts on the outside world. */
 data class Confirmation(val question: String, val answer: CompletableDeferred<Boolean>)
@@ -106,6 +109,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             _lines.update { it + ChatLine(false, reply.ifBlank { "Done." }) }
             if (app.settings.speakReplies) speak(reply)
         }
+    }
+
+    /** Fills the chat with sample lines, for screenshot tests. */
+    @VisibleForTesting
+    internal fun showPreview(sample: List<ChatLine>, status: String?) {
+        _lines.value = sample
+        _status.value = status
     }
 
     fun answerConfirmation(allow: Boolean) {

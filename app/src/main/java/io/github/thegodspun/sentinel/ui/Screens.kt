@@ -5,7 +5,12 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.PowerManager
 import android.provider.Settings as AndroidSettings
+import android.os.Build
+import android.view.WindowManager
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +20,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -41,18 +48,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -65,17 +69,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.ContextCompat
 import io.github.thegodspun.sentinel.MainActivity
 import io.github.thegodspun.sentinel.app
@@ -100,47 +109,82 @@ private val TABS = listOf(
 )
 
 @Composable
-fun SentinelScreen(chat: ChatViewModel, refreshKey: Int, actions: MainActivity.Actions) {
+fun SentinelScreen(chat: ChatViewModel, refreshKey: Int, actions: MainActivity.Actions, initialTab: Int? = null) {
     val context = LocalContext.current
-    var tab by rememberSaveable { mutableIntStateOf(if (context.app.settings.apiKey.isBlank()) 3 else 0) }
+    var tab by rememberSaveable { mutableIntStateOf(initialTab ?: if (context.app.settings.apiKey.isBlank()) 3 else 0) }
     // Hide the tab bar while typing so the keyboard has the room.
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val barSpace = if (imeVisible) 0.dp else TAB_BAR_HEIGHT + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = { if (!imeVisible) PillNavBar(TABS, tab) { tab = it } },
-    ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize()) {
-            when (tab) {
-                0 -> ChatTab(chat, actions)
-                1 -> HabitsTab(refreshKey, actions, onAsk = { tab = 0; chat.send(it) })
-                2 -> TrackerTab(refreshKey)
-                else -> SetupTab(refreshKey, actions)
+    SentinelBackground {
+        CompositionLocalProvider(LocalBottomBarSpace provides barSpace) {
+            Crossfade(targetState = tab, animationSpec = tween(220), label = "tab") { current ->
+                when (current) {
+                    0 -> ChatTab(chat, actions)
+                    1 -> HabitsTab(refreshKey, actions, onAsk = { tab = 0; chat.send(it) })
+                    2 -> TrackerTab(refreshKey)
+                    else -> SetupTab(refreshKey, actions)
+                }
             }
+        }
+        // The tab bar floats over the content, which scrolls underneath the glass.
+        if (!imeVisible) {
+            Box(Modifier.align(Alignment.BottomCenter)) { PillNavBar(TABS, tab) { tab = it } }
         }
     }
 
     val confirmation by chat.confirmation.collectAsState()
     confirmation?.let { pending ->
-        AlertDialog(
-            onDismissRequest = { chat.answerConfirmation(false) },
-            icon = { IconBadge(SentinelIcons.Shield, size = 48.dp) },
-            title = { Text("Allow this?") },
-            text = { Text(pending.question, style = MaterialTheme.typography.bodyLarge) },
-            confirmButton = {
-                Button(
-                    onClick = { chat.answerConfirmation(true) },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) { Text("Allow") }
-            },
-            dismissButton = {
-                TextButton(onClick = { chat.answerConfirmation(false) }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Not now") }
-            },
-            shape = RoundedCornerShape(28.dp),
-            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        ApprovalDialog(
+            question = pending.question,
+            onAllow = { chat.answerConfirmation(true) },
+            onDecline = { chat.answerConfirmation(false) },
         )
+    }
+}
+
+/** "Allow this?" over a blurred view of the screen behind it (Android 12+ window blur). */
+@Composable
+private fun ApprovalDialog(question: String, onAllow: () -> Unit, onDecline: () -> Unit) {
+    Dialog(onDismissRequest = onDecline) {
+        val view = LocalView.current
+        SideEffect {
+            val window = (view.parent as? DialogWindowProvider)?.window ?: return@SideEffect
+            window.setDimAmount(0.25f)
+            if (Build.VERSION.SDK_INT >= 31) {
+                window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                window.attributes = window.attributes.also { it.blurBehindRadius = 64 }
+            }
+        }
+        val dark = isSystemInDarkTheme()
+        val shape = RoundedCornerShape(32.dp)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .shadow(24.dp, shape, ambientColor = SentinelColors.Navy, spotColor = SentinelColors.Navy)
+                .clip(shape)
+                .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = if (dark) 0.9f else 0.94f))
+                .gloss(if (dark) 0.06f else 0.6f)
+                .border(1.dp, glassEdge(dark), shape)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            IconBadge(SentinelIcons.Shield, size = 56.dp)
+            Spacer(Modifier.height(16.dp))
+            Text("Allow this?", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                question,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                SoftButton("Not now", onDecline, modifier = Modifier.weight(1f))
+                GradientButton("Allow", onAllow, modifier = Modifier.weight(1f))
+            }
+        }
     }
 }
 
@@ -195,7 +239,7 @@ private fun ChatTab(chat: ChatViewModel, actions: MainActivity.Actions) {
                 if (lines.isEmpty()) {
                     item(key = "suggestions") { Suggestions(onPick = chat::send) }
                 }
-                items(lines) { line -> Bubble(line) }
+                items(lines, key = { it.id }) { line -> Bubble(line, Modifier.animateItem()) }
                 if (status != null) {
                     item(key = "thinking") { Thinking(status.orEmpty()) }
                 }
@@ -207,6 +251,7 @@ private fun ChatTab(chat: ChatViewModel, actions: MainActivity.Actions) {
                 onSend = ::submit,
                 onTalk = actions::listen,
             )
+            Spacer(Modifier.height(LocalBottomBarSpace.current))
         }
         // Keeps scrolled messages from running under the status bar icons.
         if (scrolled) {
@@ -280,29 +325,34 @@ private fun Avatar() {
 }
 
 @Composable
-private fun Bubble(line: ChatLine) {
+private fun Bubble(line: ChatLine, modifier: Modifier = Modifier) {
     if (line.fromUser) {
-        Row(Modifier.fillMaxWidth().padding(start = 64.dp, end = 14.dp), horizontalArrangement = Arrangement.End) {
+        Row(modifier.fillMaxWidth().padding(start = 64.dp, end = 14.dp), horizontalArrangement = Arrangement.End) {
             Text(
                 line.text,
                 modifier = Modifier
+                    .shadow(6.dp, RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp), ambientColor = SentinelColors.Blue, spotColor = SentinelColors.Blue)
                     .clip(RoundedCornerShape(22.dp, 22.dp, 6.dp, 22.dp))
                     .background(SentinelBrushes.Outgoing)
+                    .gloss(0.22f)
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 color = SentinelColors.White,
                 style = MaterialTheme.typography.bodyLarge,
             )
         }
     } else {
-        Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 36.dp), verticalAlignment = Alignment.Bottom) {
+        val dark = isSystemInDarkTheme()
+        Row(modifier.fillMaxWidth().padding(start = 12.dp, end = 36.dp), verticalAlignment = Alignment.Bottom) {
             Avatar()
             Spacer(Modifier.width(8.dp))
             SelectionContainer {
                 Text(
                     line.text,
                     modifier = Modifier
+                        .shadow(4.dp, RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp), ambientColor = SentinelColors.Blue.copy(alpha = 0.2f), spotColor = SentinelColors.Blue.copy(alpha = 0.2f))
                         .clip(RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = if (dark) 0.85f else 0.92f))
+                        .border(1.dp, glassEdge(dark), RoundedCornerShape(22.dp, 22.dp, 22.dp, 6.dp))
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodyLarge,
@@ -336,7 +386,6 @@ private fun Composer(draft: String, onDraft: (String) -> Unit, busy: Boolean, on
     Row(
         Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
             .padding(start = 14.dp, end = 10.dp, top = 6.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -351,8 +400,8 @@ private fun Composer(draft: String, onDraft: (String) -> Unit, busy: Boolean, on
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { onSend() }),
             colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
                 focusedIndicatorColor = Color.Transparent,
                 unfocusedIndicatorColor = Color.Transparent,
             ),
@@ -379,7 +428,7 @@ private fun TrackerTab(refreshKey: Int) {
 
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 24.dp),
+        contentPadding = PaddingValues(bottom = 24.dp + LocalBottomBarSpace.current),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item(key = "header") {
@@ -615,7 +664,7 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
                 Spacer(Modifier.height(12.dp))
                 SoftButton("Run a check now", { SentinelWorker.runNow(context) }, icon = SentinelIcons.Shield)
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp + LocalBottomBarSpace.current))
         }
     }
 }

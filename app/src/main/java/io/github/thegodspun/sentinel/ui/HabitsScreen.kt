@@ -1,6 +1,7 @@
 package io.github.thegodspun.sentinel.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -171,7 +173,7 @@ fun HabitsTab(refreshKey: Int, actions: MainActivity.Actions, onAsk: (String) ->
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(8.dp + LocalBottomBarSpace.current))
         }
     }
 }
@@ -181,7 +183,13 @@ private fun RhythmStat(icon: ImageVector, label: String, value: String, modifier
     Column(
         modifier
             .clip(RoundedCornerShape(20.dp))
-            .background(SentinelColors.White.copy(alpha = 0.12f))
+            .background(SentinelColors.White.copy(alpha = 0.13f))
+            .gloss(0.14f)
+            .border(
+                1.dp,
+                Brush.verticalGradient(listOf(SentinelColors.White.copy(alpha = 0.4f), SentinelColors.White.copy(alpha = 0.06f))),
+                RoundedCornerShape(20.dp),
+            )
             .padding(14.dp),
     ) {
         Icon(icon, null, tint = SentinelColors.GreenLight, modifier = Modifier.size(18.dp))

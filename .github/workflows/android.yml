@@ -46,3 +46,28 @@ jobs:
             --target "${GITHUB_SHA}" \
             --title "Sentinel latest build" \
             --notes "Built from ${GITHUB_REF_NAME} at ${GITHUB_SHA::7}. On your phone, tap Sentinel.apk to download, then open it to install."
+
+      # Renders every screen so the design can be reviewed without a phone. Never blocks the APK.
+      - name: Render screenshots
+        id: screenshots
+        continue-on-error: true
+        run: ./gradlew --no-daemon :app:recordRoborazziDebug
+
+      - name: Upload screenshots
+        if: steps.screenshots.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-screenshots
+          path: app/build/screenshots/*.png
+
+      - name: Publish "ui-screenshots" release
+        if: github.event_name != 'pull_request' && steps.screenshots.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ui-screenshots --yes --cleanup-tag || true
+          gh release create ui-screenshots app/build/screenshots/*.png \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --title "Sentinel screenshots" \
+            --notes "Screens rendered from ${GITHUB_REF_NAME} at ${GITHUB_SHA::7}."

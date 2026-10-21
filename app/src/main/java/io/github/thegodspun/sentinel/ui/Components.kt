@@ -9,6 +9,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -39,10 +41,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -55,6 +61,57 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import java.time.LocalTime
+
+/** Space the floating tab bar takes at the bottom, so scrolling content can end above it. */
+val LocalBottomBarSpace = compositionLocalOf { 0.dp }
+
+/** Height of the floating tab bar, not counting the system navigation bar. */
+val TAB_BAR_HEIGHT = 84.dp
+
+/** A highlight across the top half, like light on glass. */
+fun Modifier.gloss(strength: Float): Modifier = drawBehind {
+    drawRect(
+        Brush.verticalGradient(listOf(SentinelColors.White.copy(alpha = strength), Color.Transparent), endY = size.height * 0.55f),
+        size = Size(size.width, size.height * 0.55f),
+    )
+}
+
+/** A bright top edge fading out toward the bottom, for glass surfaces. */
+fun glassEdge(dark: Boolean): Brush = Brush.verticalGradient(
+    if (dark) listOf(SentinelColors.White.copy(alpha = 0.16f), SentinelColors.White.copy(alpha = 0.03f))
+    else listOf(SentinelColors.White, SentinelColors.BlueLight.copy(alpha = 0.35f))
+)
+
+/** The app background: soft blue and green light pooling in the corners, behind the glass. */
+@Composable
+fun SentinelBackground(content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val base = MaterialTheme.colorScheme.background
+    Box(
+        Modifier
+            .fillMaxSize()
+            .drawBehind {
+                drawRect(base)
+                val w = size.width
+                val h = size.height
+                drawCircle(
+                    Brush.radialGradient(
+                        listOf(SentinelColors.BlueBright.copy(alpha = if (dark) 0.22f else 0.14f), Color.Transparent),
+                        Offset(w, h * 0.35f), w * 0.9f,
+                    ),
+                    radius = w * 0.9f, center = Offset(w, h * 0.35f),
+                )
+                drawCircle(
+                    Brush.radialGradient(
+                        listOf(SentinelColors.GreenBright.copy(alpha = if (dark) 0.14f else 0.10f), Color.Transparent),
+                        Offset(0f, h * 0.85f), w * 0.85f,
+                    ),
+                    radius = w * 0.85f, center = Offset(0f, h * 0.85f),
+                )
+            },
+        content = content,
+    )
+}
 
 fun greeting(now: LocalTime = LocalTime.now()): String = when (now.hour) {
     in 4..11 -> "Good morning"
@@ -75,11 +132,38 @@ fun GradientHeader(
     action: (@Composable () -> Unit)? = null,
     content: (@Composable ColumnScope.() -> Unit)? = null,
 ) {
+    val base = SentinelBrushes.Header
+    // Two soft lights, green and blue, drift slowly across the header like an aurora.
+    val drift by rememberInfiniteTransition(label = "aurora").animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(16_000, easing = LinearEasing), RepeatMode.Reverse),
+        label = "drift",
+    )
     Column(
         Modifier
             .fillMaxWidth()
+            .shadow(16.dp, RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp), ambientColor = SentinelColors.Blue, spotColor = SentinelColors.Blue)
             .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
-            .background(SentinelBrushes.Header)
+            .drawBehind {
+                drawRect(base)
+                val w = size.width
+                val h = size.height
+                val green = Offset(w * (0.1f + 0.35f * drift), h * 0.95f)
+                drawCircle(
+                    Brush.radialGradient(listOf(SentinelColors.GreenBright.copy(alpha = 0.32f), Color.Transparent), green, w * 0.55f),
+                    radius = w * 0.55f, center = green,
+                )
+                val blue = Offset(w * (0.95f - 0.3f * drift), h * 0.05f)
+                drawCircle(
+                    Brush.radialGradient(listOf(SentinelColors.BlueLight.copy(alpha = 0.38f), Color.Transparent), blue, w * 0.6f),
+                    radius = w * 0.6f, center = blue,
+                )
+                // Glossy top half, like polished glass.
+                drawRect(
+                    Brush.verticalGradient(listOf(SentinelColors.White.copy(alpha = 0.16f), Color.Transparent), endY = h * 0.55f),
+                    size = Size(w, h * 0.55f),
+                )
+            }
             .windowInsetsPadding(WindowInsets.statusBars)
             .padding(start = 22.dp, end = 14.dp, top = 14.dp, bottom = 24.dp),
     ) {
@@ -111,8 +195,13 @@ fun GlassPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(22.dp))
-            .background(SentinelColors.White.copy(alpha = 0.12f))
-            .border(1.dp, SentinelColors.White.copy(alpha = 0.18f), RoundedCornerShape(22.dp))
+            .background(SentinelColors.White.copy(alpha = 0.13f))
+            .gloss(0.14f)
+            .border(
+                1.dp,
+                Brush.verticalGradient(listOf(SentinelColors.White.copy(alpha = 0.45f), SentinelColors.White.copy(alpha = 0.08f))),
+                RoundedCornerShape(22.dp),
+            )
             .padding(16.dp),
         content = content,
     )
@@ -140,12 +229,16 @@ fun SentinelCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(24.dp)
+    val dark = isSystemInDarkTheme()
     Column(
         modifier
             .fillMaxWidth()
-            .shadow(6.dp, shape, ambientColor = SentinelColors.Blue.copy(alpha = 0.10f), spotColor = SentinelColors.Blue.copy(alpha = 0.14f))
+            .shadow(8.dp, shape, ambientColor = SentinelColors.Blue.copy(alpha = 0.12f), spotColor = SentinelColors.Blue.copy(alpha = 0.18f))
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
+            // Frosted glass: mostly opaque, so the background glow shows through a little.
+            .background(MaterialTheme.colorScheme.surfaceContainer.copy(alpha = if (dark) 0.78f else 0.86f))
+            .gloss(if (dark) 0.05f else 0.5f)
+            .border(1.dp, glassEdge(dark), shape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(padding),
         content = content,
@@ -197,6 +290,8 @@ fun GradientButton(
             .shadow(10.dp, CircleShape, ambientColor = SentinelColors.Green.copy(alpha = 0.3f), spotColor = SentinelColors.Green.copy(alpha = 0.35f))
             .clip(CircleShape)
             .background(brush)
+            .gloss(0.32f)
+            .border(1.dp, Brush.verticalGradient(listOf(SentinelColors.White.copy(alpha = 0.5f), Color.Transparent)), CircleShape)
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 22.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -320,12 +415,15 @@ fun PillNavBar(tabs: List<NavTab>, selected: Int, onSelect: (Int) -> Unit) {
             .windowInsetsPadding(WindowInsets.navigationBars)
             .padding(horizontal = 18.dp, vertical = 10.dp),
     ) {
+        val dark = isSystemInDarkTheme()
         Row(
             Modifier
                 .fillMaxWidth()
-                .shadow(18.dp, CircleShape, ambientColor = SentinelColors.Navy.copy(alpha = 0.25f), spotColor = SentinelColors.Navy.copy(alpha = 0.3f))
+                .shadow(20.dp, CircleShape, ambientColor = SentinelColors.Navy.copy(alpha = 0.3f), spotColor = SentinelColors.Navy.copy(alpha = 0.35f))
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (dark) 0.88f else 0.9f))
+                .gloss(if (dark) 0.06f else 0.6f)
+                .border(1.dp, glassEdge(dark), CircleShape)
                 .padding(6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
@@ -342,7 +440,7 @@ private fun RowScope.NavItem(tab: NavTab, selected: Boolean, onClick: () -> Unit
             .weight(if (selected) 1.6f else 1f)
             .height(52.dp)
             .clip(CircleShape)
-            .then(if (selected) Modifier.background(SentinelBrushes.Outgoing) else Modifier)
+            .then(if (selected) Modifier.background(SentinelBrushes.Outgoing).gloss(0.3f) else Modifier)
             .clickable(role = Role.Tab, onClickLabel = tab.label, onClick = onClick)
             .animateContentSize(tween(220, easing = FastOutSlowInEasing)),
         horizontalArrangement = Arrangement.Center,
@@ -391,6 +489,8 @@ fun MicButton(busy: Boolean, onClick: () -> Unit) {
                 .shadow(12.dp, CircleShape, ambientColor = SentinelColors.Green.copy(alpha = 0.4f), spotColor = SentinelColors.Green.copy(alpha = 0.5f))
                 .clip(CircleShape)
                 .background(SentinelBrushes.Go)
+                .gloss(0.38f)
+                .border(1.dp, Brush.verticalGradient(listOf(SentinelColors.White.copy(alpha = 0.55f), Color.Transparent)), CircleShape)
                 .clickable(role = Role.Button, onClickLabel = "Talk to Sentinel", onClick = onClick),
             contentAlignment = Alignment.Center,
         ) { Icon(SentinelIcons.Mic, "Talk", tint = SentinelColors.White, modifier = Modifier.size(26.dp)) }
@@ -406,6 +506,8 @@ fun SendButton(onClick: () -> Unit) {
             .shadow(10.dp, CircleShape, ambientColor = SentinelColors.Blue.copy(alpha = 0.35f), spotColor = SentinelColors.Blue.copy(alpha = 0.4f))
             .clip(CircleShape)
             .background(SentinelBrushes.Outgoing)
+            .gloss(0.35f)
+            .border(1.dp, Brush.verticalGradient(listOf(SentinelColors.White.copy(alpha = 0.5f), Color.Transparent)), CircleShape)
             .clickable(role = Role.Button, onClickLabel = "Send", onClick = onClick),
         contentAlignment = Alignment.Center,
     ) { Icon(SentinelIcons.Send, "Send", tint = SentinelColors.White, modifier = Modifier.size(22.dp)) }
