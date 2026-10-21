@@ -12,6 +12,9 @@ import io.github.thegodspun.sentinel.core.CapturedNotification
 import io.github.thegodspun.sentinel.core.MESSAGING_APPS
 import io.github.thegodspun.sentinel.core.NotificationFilter
 import io.github.thegodspun.sentinel.core.TextFilter
+import io.github.thegodspun.sentinel.core.safeTake
+import io.github.thegodspun.sentinel.core.sanitizeUnicode
+import io.github.thegodspun.sentinel.work.ContextLearner
 import io.github.thegodspun.sentinel.work.SentinelWorker
 import java.time.LocalDateTime
 
@@ -43,24 +46,26 @@ class NotificationWatcher : NotificationListenerService() {
 
         val settings = app.settings
         val messagingApp = MESSAGING_APPS[sbn.packageName]
-        if (messagingApp != null && settings.learnFromTexts && !TextFilter.isSecretCode(text)) {
+        if (messagingApp != null && settings.learnFromTexts && !TextFilter.isSecretCode("$title $text")) {
             // RCS and chat-app messages can't be read from history, so learn from them as they arrive.
             app.messages.add(
                 CapturedNotification(
                     app = messagingApp,
-                    title = title.take(100),
-                    text = text.take(1000),
+                    title = title.safeTake(100).sanitizeUnicode(),
+                    text = text.safeTake(1000).sanitizeUnicode(),
                     postedAt = LocalDateTime.now().withNano(0).toString(),
                 )
             )
+            if (app.messages.size >= ContextLearner.BATCH_SIZE) SentinelWorker.runSoon(this)
         }
         if (!settings.reviewAllNotifications && !NotificationFilter.isRelevant(title, text)) return
 
+        // Login codes never leave the phone; the rest of the notice still does.
         app.inbox.add(
             CapturedNotification(
                 app = appLabel(sbn.packageName),
-                title = title.take(200),
-                text = text.take(1500),
+                title = TextFilter.redactCodes(title.safeTake(200)).sanitizeUnicode(),
+                text = TextFilter.redactCodes(text.safeTake(1500)).sanitizeUnicode(),
                 postedAt = LocalDateTime.now().withNano(0).toString(),
             )
         )

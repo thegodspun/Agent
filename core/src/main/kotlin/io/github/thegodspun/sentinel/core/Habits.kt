@@ -357,8 +357,14 @@ object HabitProfile {
     }
 }
 
-/** Tools for the habit coach. Safe in background runs. */
-fun habitTools(habits: HabitStore, clock: () -> LocalDateTime): List<AgentTool> = listOf(
+/**
+ * Tools for the habit coach. With [background] set, goals can't be changed: they're the
+ * user's own words, so only the user (in chat) sets or removes them.
+ */
+fun habitTools(habits: HabitStore, background: Boolean = false, clock: () -> LocalDateTime): List<AgentTool> =
+    allHabitTools(habits, clock).filter { !background || it.name !in setOf("set_habit_goal", "remove_habit_goal") }
+
+private fun allHabitTools(habits: HabitStore, clock: () -> LocalDateTime): List<AgentTool> = listOf(
     object : AgentTool(
         "habit_report",
         "Get the user's recent habit data: sleep and wake estimates, screen time, late-night use, " +

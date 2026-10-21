@@ -14,6 +14,7 @@ data class CapturedNotification(
     val postedAt: String,
     /** For messages read off the screen: the user sent it. */
     val outgoing: Boolean = false,
+    val id: String = java.util.UUID.randomUUID().toString(),
 )
 
 /** Notifications waiting for the next sentinel review. Capped so it can't grow forever. */
@@ -33,6 +34,11 @@ class InboxStore(private val file: File, private val maxItems: Int = 200) {
     /** Removes the first [count] items (the ones that were just reviewed). */
     fun drop(count: Int) = synchronized(lock) { write(read().drop(count)) }
 
+    /** Removes exactly these items, leaving anything that arrived meanwhile. */
+    fun remove(ids: Set<String>) = synchronized(lock) { write(read().filterNot { it.id in ids }) }
+
+    val size: Int get() = all().size
+
     private fun read(): List<CapturedNotification> =
         readOrQuarantine(file, emptyList()) { json.decodeFromString(it) }
 
@@ -46,18 +52,23 @@ class InboxStore(private val file: File, private val maxItems: Int = 200) {
  * the phone.
  */
 object NotificationFilter {
-    val KEYWORDS = listOf(
-        "appeal", "deadline", "due", "overdue", "expire", "renew", "recertif", "deny", "denied",
-        "approved", "approval", "appointment", "reschedul", "cancel", "confirm", "claim", "benefit",
-        "social security", "ssa", "ssdi", "ssi", "medicaid", "medicare", "insurance", "eob",
-        "explanation of benefits", "prior auth", "authorization", "prescription", "refill", "pharmacy",
-        "payment", "bill", "invoice", "balance", "hearing", "disability", "veteran", "va ", "mychart",
-        "doctor", "clinic", "hospital", "therapy", "wheelchair", "dme", "supplies", "caseworker",
-        "notice", "letter", "document", "verification", "eligib", "snap", "housing", "paratransit",
+    /** Word beginnings: "appoint" matches "appointment", "renew" matches "renewal". */
+    private val STEMS = listOf(
+        "appeal", "deadline", "overdue", "expir", "renew", "recertif", "deny", "denied", "approv",
+        "appointment", "reschedul", "cancel", "confirm", "claim", "benefit", "social security", "medicaid",
+        "medicare", "insurance", "explanation of benefits", "prior auth", "authorization", "prescription",
+        "refill", "pharmac", "payment", "invoice", "balance", "hearing", "disabilit", "veteran", "mychart",
+        "doctor", "clinic", "hospital", "therap", "wheelchair", "supplies", "caseworker", "case manager",
+        "notice", "letter", "document", "verification", "eligib", "housing", "paratransit", "copay", "deductible",
     )
 
-    fun isRelevant(title: String, text: String): Boolean {
-        val haystack = "$title $text".lowercase()
-        return KEYWORDS.any { it in haystack }
-    }
+    /** Short words that must match exactly, so "ssa" doesn't match "message". */
+    private val WORDS = listOf("ssa", "ssi", "ssdi", "va", "eob", "dme", "snap", "bill", "bills", "billed", "billing", "due", "pt", "ot")
+
+    private val pattern = Regex(
+        "\\b(?:" + STEMS.joinToString("|") { Regex.escape(it) } + ")|\\b(?:" + WORDS.joinToString("|") + ")\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
+    fun isRelevant(title: String, text: String): Boolean = pattern.containsMatchIn("$title $text")
 }

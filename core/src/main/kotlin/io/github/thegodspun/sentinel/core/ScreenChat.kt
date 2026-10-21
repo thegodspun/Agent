@@ -1,6 +1,7 @@
 package io.github.thegodspun.sentinel.core
 
 import kotlinx.serialization.encodeToString
+import java.time.LocalDate
 import kotlinx.serialization.json.Json
 import java.io.File
 
@@ -13,9 +14,11 @@ data class ScreenNode(
     val right: Int,
     val bottom: Int,
     val editable: Boolean = false,
+    val clickable: Boolean = false,
 )
 
-data class ScreenMessage(val outgoing: Boolean, val text: String)
+/** A message read off the screen. [date] comes from the date header above it, when there is one. */
+data class ScreenMessage(val outgoing: Boolean, val text: String, val date: LocalDate? = null)
 
 data class ScreenConversation(val person: String, val messages: List<ScreenMessage>)
 
@@ -44,27 +47,94 @@ object ScreenChatParser {
         "this chat is", "today ·", "yesterday ·",
     )
 
-    fun parse(nodes: List<ScreenNode>, width: Int, height: Int): ScreenConversation? {
+    fun parse(nodes: List<ScreenNode>, width: Int, height: Int, today: LocalDate = LocalDate.now()): ScreenConversation? {
         if (width <= 0 || height <= 0) return null
         // A conversation has a compose box in the lower part of the screen; the chat list doesn't.
         val compose = nodes.filter { it.editable }.maxByOrNull { it.bottom } ?: return null
         if (compose.top < height * 0.35) return null
 
         val topBar = height * 0.14
-        val person = nodes.firstOrNull {
+        val title = nodes.firstOrNull {
             !it.editable && !it.text.isNullOrBlank() && it.bottom <= topBar * 1.4 && !isChrome(it.text)
-        }?.text?.trim() ?: return null
+        } ?: return null
+        val person = title.text!!.trim()
 
-        val messages = nodes
+        // Everything between the chat's title and the compose box.
+        val body = nodes
             .filter { n ->
-                !n.editable && !n.text.isNullOrBlank() && n.top >= topBar && n.bottom <= compose.top + 4 &&
-                    !isChrome(n.text) && n.text.trim() != person
+                n !== title && !n.editable && !n.text.isNullOrBlank() && n.top >= title.bottom - 4 &&
+                    n.bottom <= compose.top + 4 && n.text.trim() != person
             }
             .sortedWith(compareBy({ it.top }, { it.left }))
-            .map { ScreenMessage(outgoing = isOutgoing(it, width), text = it.text!!.trim()) }
-            .filter { it.text.length >= 2 && !TextFilter.isSecretCode(it.text) }
-            .distinct()
-        return if (messages.isEmpty()) null else ScreenConversation(person, messages)
+        val chips = suggestionChips(body, compose)
+
+        val messages = mutableListOf<ScreenMessage>()
+        var date: LocalDate? = null
+        for (n in body) {
+            if (n in chips) continue
+            val text = n.text!!.trim()
+            if (isCentered(n, width)) {
+                // Centered lines are date headers ("Today · 10:42 AM") and banners, not messages.
+                parseDateHeader(text, today)?.let { date = it }
+                if (isChrome(text) || parseDateHeader(text, today) != null) continue
+            } else if (isStatusLine(text)) {
+                continue // "Delivered", "10:45 AM" under a bubble
+            }
+            if (text.length < 2 || TextFilter.isSecretCode(text)) continue
+            messages += ScreenMessage(outgoing = isOutgoing(n, width), text = text, date = date)
+        }
+        val unique = messages.distinctBy { Triple(it.outgoing, it.text, it.date) }
+        return if (unique.isEmpty()) null else ScreenConversation(person, unique)
+    }
+
+    /** Smart Reply and suggestion chips: a row of short tappable items just above the compose box. */
+    private fun suggestionChips(body: List<ScreenNode>, compose: ScreenNode): Set<ScreenNode> {
+        val band = body.filter { it.clickable && it.bottom <= compose.top + 4 && it.top >= compose.top - (compose.bottom - compose.top) * 2.5 }
+        return band.groupBy { it.top / 24 }.values.filter { it.size >= 2 }.flatten().toSet()
+    }
+
+    private fun isCentered(n: ScreenNode, width: Int): Boolean {
+        val center = (n.left + n.right) / 2.0
+        return kotlin.math.abs(center - width / 2.0) < width * 0.1 && (n.right - n.left) < width * 0.75
+    }
+
+    private val statusOnly = Regex(
+        """^((sent|delivered|read|seen|edited|sending…?|failed|not sent)\s*[·•]?\s*)?(\d{1,2}:\d{2}\s?([ap]\.?\s?m\.?)?)?$""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** A delivery status or bare timestamp shown under a bubble. */
+    fun isStatusLine(text: String): Boolean {
+        val t = text.trim()
+        return t.isNotEmpty() && statusOnly.matches(t) && (time.containsMatchIn(t.lowercase()) || t.lowercase() in chromeWords)
+    }
+
+    private val months = listOf("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
+    private val weekdays = listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+    /** Reads a date header such as "Today", "Yesterday · 9:15 PM", "Tuesday", "Oct 21" or "Mon, Jun 3, 2025". */
+    fun parseDateHeader(text: String, today: LocalDate): LocalDate? {
+        val t = text.trim().lowercase()
+        if (t.length > 40) return null
+        if (t.startsWith("today")) return today
+        if (t.startsWith("yesterday")) return today.minusDays(1)
+        val words = t.split(Regex("[\\s,·•]+")).filter { it.isNotBlank() }
+        val month = words.firstNotNullOfOrNull { w -> months.indexOfFirst { w.startsWith(it) }.takeIf { it >= 0 && w.length <= 9 } }
+        val numbers = words.mapNotNull { it.trimEnd('.').toIntOrNull() }
+        if (month != null) {
+            val day = numbers.firstOrNull { it in 1..31 } ?: return null
+            val year = numbers.firstOrNull { it in 2000..2100 }
+            return runCatching {
+                val candidate = LocalDate.of(year ?: today.year, month + 1, day)
+                if (year == null && candidate.isAfter(today)) candidate.minusYears(1) else candidate
+            }.getOrNull()
+        }
+        val weekday = words.firstNotNullOfOrNull { w -> weekdays.indexOfFirst { w.startsWith(it) }.takeIf { it >= 0 && w.length <= 9 } }
+        if (weekday != null && words.size <= 4) {
+            val back = (today.dayOfWeek.value - (weekday + 1) + 7) % 7
+            return today.minusDays(if (back == 0) 7L else back.toLong())
+        }
+        return null
     }
 
     /** Timestamps, date separators, delivery status and banners rather than message text. */

@@ -41,6 +41,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -60,6 +62,10 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeStyle
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeChild
 import java.time.LocalTime
 
 /** Space the floating tab bar takes at the bottom, so scrolling content can end above it. */
@@ -84,7 +90,7 @@ fun glassEdge(dark: Boolean): Brush = Brush.verticalGradient(
 
 /** The app background: soft blue and green light pooling in the corners, behind the glass. */
 @Composable
-fun SentinelBackground(content: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
+fun SentinelBackground(content: @Composable () -> Unit) {
     val dark = isSystemInDarkTheme()
     val base = MaterialTheme.colorScheme.background
     Box(
@@ -109,8 +115,10 @@ fun SentinelBackground(content: @Composable androidx.compose.foundation.layout.B
                     radius = w * 0.85f, center = Offset(0f, h * 0.85f),
                 )
             },
-        content = content,
-    )
+    ) {
+        // Without a Material Surface around the screens, text needs its default color set here.
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onBackground) { content() }
+    }
 }
 
 fun greeting(now: LocalTime = LocalTime.now()): String = when (now.hour) {
@@ -241,8 +249,9 @@ fun SentinelCard(
             .border(1.dp, glassEdge(dark), shape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(padding),
-        content = content,
-    )
+    ) {
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) { content() }
+    }
 }
 
 @Composable
@@ -408,7 +417,7 @@ data class NavTab(val label: String, val icon: ImageVector)
 
 /** A floating, pill-shaped tab bar. The selected tab grows to show its name. */
 @Composable
-fun PillNavBar(tabs: List<NavTab>, selected: Int, onSelect: (Int) -> Unit) {
+fun PillNavBar(tabs: List<NavTab>, selected: Int, hazeState: HazeState? = null, onSelect: (Int) -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
@@ -421,7 +430,22 @@ fun PillNavBar(tabs: List<NavTab>, selected: Int, onSelect: (Int) -> Unit) {
                 .fillMaxWidth()
                 .shadow(20.dp, CircleShape, ambientColor = SentinelColors.Navy.copy(alpha = 0.3f), spotColor = SentinelColors.Navy.copy(alpha = 0.35f))
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (dark) 0.88f else 0.9f))
+                .then(
+                    if (hazeState != null) {
+                        // Frosted glass: whatever scrolls behind the bar is blurred, then tinted.
+                        Modifier.hazeChild(
+                            hazeState,
+                            style = HazeStyle(
+                                backgroundColor = MaterialTheme.colorScheme.background,
+                                tint = HazeTint(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (dark) 0.72f else 0.7f)),
+                                blurRadius = 28.dp,
+                                noiseFactor = 0.04f,
+                            ),
+                        )
+                    } else {
+                        Modifier.background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f))
+                    }
+                )
                 .gloss(if (dark) 0.06f else 0.6f)
                 .border(1.dp, glassEdge(dark), CircleShape)
                 .padding(6.dp),
@@ -459,9 +483,12 @@ private fun RowScope.NavItem(tab: NavTab, selected: Boolean, onClick: () -> Unit
     }
 }
 
-/** The green voice button. A soft ring pulses around it while Sentinel is working. */
+/**
+ * The green voice button. While Sentinel is working it turns into a blue stop button with a
+ * soft pulsing ring, so a long request can always be cancelled.
+ */
 @Composable
-fun MicButton(busy: Boolean, onClick: () -> Unit) {
+fun MicButton(busy: Boolean, onClick: () -> Unit, onStop: () -> Unit = {}) {
     val pulse = rememberInfiniteTransition(label = "pulse")
     val scale by pulse.animateFloat(
         initialValue = 1f, targetValue = 1.35f,
@@ -488,12 +515,23 @@ fun MicButton(busy: Boolean, onClick: () -> Unit) {
                 .size(56.dp)
                 .shadow(12.dp, CircleShape, ambientColor = SentinelColors.Green.copy(alpha = 0.4f), spotColor = SentinelColors.Green.copy(alpha = 0.5f))
                 .clip(CircleShape)
-                .background(SentinelBrushes.Go)
+                .background(if (busy) SentinelBrushes.Outgoing else SentinelBrushes.Go)
                 .gloss(0.38f)
                 .border(1.dp, Brush.verticalGradient(listOf(SentinelColors.White.copy(alpha = 0.55f), Color.Transparent)), CircleShape)
-                .clickable(role = Role.Button, onClickLabel = "Talk to Sentinel", onClick = onClick),
+                .clickable(
+                    role = Role.Button,
+                    onClickLabel = if (busy) "Stop" else "Talk to Sentinel",
+                    onClick = if (busy) onStop else onClick,
+                ),
             contentAlignment = Alignment.Center,
-        ) { Icon(SentinelIcons.Mic, "Talk", tint = SentinelColors.White, modifier = Modifier.size(26.dp)) }
+        ) {
+            Icon(
+                if (busy) SentinelIcons.Stop else SentinelIcons.Mic,
+                if (busy) "Stop" else "Talk",
+                tint = SentinelColors.White,
+                modifier = Modifier.size(if (busy) 22.dp else 26.dp),
+            )
+        }
     }
 }
 

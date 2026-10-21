@@ -19,6 +19,8 @@ import io.github.thegodspun.sentinel.core.Reminders
 import io.github.thegodspun.sentinel.core.coreTools
 import io.github.thegodspun.sentinel.core.describeNow
 import io.github.thegodspun.sentinel.habits.UsageCollector
+import com.anthropic.errors.BadRequestException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withLock
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -45,16 +47,23 @@ class SentinelWorker(context: Context, params: WorkerParameters) : CoroutineWork
         if (Briefing.userProbablyAsleep(applicationContext)) return@withLock Result.success()
         sendReminders()
         if (app.settings.apiKey.isBlank()) return@withLock Result.success()
-        try {
-            // The briefing goes first so it can include what came in overnight.
-            Briefing.deliverIfDue(applicationContext)
-            if (!Briefing.holdingForBriefing(applicationContext)) reviewInbox()
-            ContextLearner.runIfDue(applicationContext)
-            Result.success()
-        } catch (e: Exception) {
-            Log.w(TAG, "Sentinel check failed", e)
-            if (runAttemptCount < 3) Result.retry() else Result.success()
+        // Each step runs on its own, so one failure can't hold up the others.
+        var failed = false
+        suspend fun step(name: String, block: suspend () -> Unit) {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "$name failed", e)
+                failed = true
+            }
         }
+        // The briefing goes first so it can include what came in overnight.
+        step("Briefing") { Briefing.deliverIfDue(applicationContext) }
+        step("Notification review") { if (!Briefing.holdingForBriefing(applicationContext)) reviewInbox() }
+        step("Learning from texts") { ContextLearner.runIfDue(applicationContext) }
+        if (failed && runAttemptCount < 3) Result.retry() else Result.success()
     }
 
     private fun sendReminders() {
@@ -76,13 +85,19 @@ class SentinelWorker(context: Context, params: WorkerParameters) : CoroutineWork
         val pending = app.inbox.all().take(40)
         if (pending.isEmpty()) return
         val conversation = Conversation(
-            config = app.settings.agentConfig(effortOverride = "low"),
+            config = app.settings.agentConfig(effortOverride = "low").copy(webSearch = false),
             systemPrompt = Prompts.background(app.settings.aboutMe, app.notes.all()),
-            tools = coreTools(app.tracker, app.notes) { LocalDateTime.now() },
+            tools = coreTools(app.tracker, app.notes, provenance = "a notification") { LocalDateTime.now() },
         )
-        val reply = conversation.send(Prompts.triage(pending, describeNow(LocalDateTime.now())))
-        app.inbox.drop(pending.size)
-        if (!reply.trim().startsWith(Prompts.NOTHING)) {
+        val reply = try {
+            conversation.send(Prompts.triage(pending, describeNow(LocalDateTime.now())), refusalReply = "")
+        } catch (e: BadRequestException) {
+            // Something in these notifications can't be sent; drop them rather than retrying forever.
+            Log.w(TAG, "Dropping notifications the API rejected", e)
+            ""
+        }
+        app.inbox.remove(pending.map { it.id }.toSet())
+        if (reply.isNotBlank() && !reply.trim().startsWith(Prompts.NOTHING)) {
             Notifications.post(applicationContext, Notifications.CHANNEL_REMINDERS, TRIAGE_ID, "Sentinel alert", reply)
         }
         // Items the review just added may already be close to due.

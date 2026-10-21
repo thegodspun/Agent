@@ -12,7 +12,11 @@ import io.github.thegodspun.sentinel.app
 import io.github.thegodspun.sentinel.core.CapturedNotification
 import io.github.thegodspun.sentinel.core.ScreenChatParser
 import io.github.thegodspun.sentinel.core.ScreenNode
-import java.time.LocalDateTime
+import io.github.thegodspun.sentinel.core.safeTake
+import io.github.thegodspun.sentinel.core.sanitizeUnicode
+import io.github.thegodspun.sentinel.work.ContextLearner
+import io.github.thegodspun.sentinel.work.SentinelWorker
+import java.time.LocalDate
 
 /**
  * Accessibility service that lets the agent operate other apps: read what is on screen,
@@ -55,24 +59,27 @@ class PhoneControlService : AccessibilityService() {
                 val description = node.contentDescription?.toString()
                 if (text.isNullOrBlank() && description.isNullOrBlank() && !node.isEditable) return@walk
                 node.getBoundsInScreen(bounds)
-                nodes += ScreenNode(text, description, bounds.left, bounds.top, bounds.right, bounds.bottom, node.isEditable)
+                val clickable = node.isClickable || node.parent?.isClickable == true
+                nodes += ScreenNode(text, description, bounds.left, bounds.top, bounds.right, bounds.bottom, node.isEditable, clickable)
             }
             val metrics = resources.displayMetrics
-            val chat = ScreenChatParser.parse(nodes, metrics.widthPixels, metrics.heightPixels) ?: return
-            val now = LocalDateTime.now().withNano(0).toString()
+            val chat = ScreenChatParser.parse(nodes, metrics.widthPixels, metrics.heightPixels, LocalDate.now()) ?: return
             chat.messages
                 .filter { app.seenOnScreen.firstTime("${chat.person}|${it.outgoing}|${it.text}") }
                 .forEach {
                     app.messages.add(
                         CapturedNotification(
                             app = "Messages (screen)",
-                            title = chat.person.take(100),
-                            text = it.text.take(1000),
-                            postedAt = now,
+                            title = chat.person.safeTake(100).sanitizeUnicode(),
+                            text = it.text.safeTake(1000).sanitizeUnicode(),
+                            // The date header above the message, if one was on screen; old messages
+                            // must not be read as if they were sent today.
+                            postedAt = it.date?.toString() ?: "unknown",
                             outgoing = it.outgoing,
                         )
                     )
                 }
+            if (app.messages.size >= ContextLearner.BATCH_SIZE) SentinelWorker.runSoon(this)
         } catch (e: Exception) {
             // Screen trees change underneath us; a missed read just waits for the next redraw.
             Log.w("PhoneControlService", "Couldn't read the open chat", e)

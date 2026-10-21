@@ -6,8 +6,21 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
-/** Tools that only touch the agent's own data, so they are safe in background jobs. */
-fun coreTools(tracker: TrackerStore, notes: NotesStore, clock: () -> LocalDateTime): List<AgentTool> = listOf(
+/**
+ * Tools that only touch Sentinel's own data. With [provenance] set (background jobs that read
+ * other people's messages and notifications), the set is add-only: nothing can be changed,
+ * closed or deleted, and whatever is added is labeled with where it came from, so a planted
+ * message can't quietly cancel a real deadline or pose as a fact the user gave.
+ */
+fun coreTools(
+    tracker: TrackerStore,
+    notes: NotesStore,
+    provenance: String? = null,
+    clock: () -> LocalDateTime,
+): List<AgentTool> = allCoreTools(tracker, notes, clock, provenance)
+    .filter { provenance == null || it.name !in setOf("tracker_update", "tracker_delete", "forget") }
+
+private fun allCoreTools(tracker: TrackerStore, notes: NotesStore, clock: () -> LocalDateTime, provenance: String?): List<AgentTool> = listOf(
     object : AgentTool(
         "get_current_time",
         "Returns the current local date, weekday and time on the phone.",
@@ -30,11 +43,13 @@ fun coreTools(tracker: TrackerStore, notes: NotesStore, clock: () -> LocalDateTi
         )
         override val required = listOf("title", "category")
         override suspend fun run(input: ToolInput): String {
+            val notesText = input.stringOrNull("notes").orEmpty()
             val item = tracker.add(
                 title = input.string("title"),
                 category = input.string("category"),
                 due = input.stringOrNull("due"),
-                notes = input.stringOrNull("notes").orEmpty(),
+                notes = if (provenance == null) notesText
+                else "$notesText (Added automatically from $provenance on ${clock().toLocalDate()}; please double-check.)".trim(),
                 now = clock(),
             )
             return "Saved: ${item.describe()}"
@@ -104,7 +119,8 @@ fun coreTools(tracker: TrackerStore, notes: NotesStore, clock: () -> LocalDateTi
         override val properties = mapOf("fact" to stringProp("One self-contained fact"))
         override val required = listOf("fact")
         override suspend fun run(input: ToolInput): String {
-            notes.add(input.string("fact"))
+            val fact = input.string("fact")
+            notes.add(if (provenance == null) fact else "$fact [from $provenance, ${clock().toLocalDate()}, unconfirmed]")
             return "Remembered."
         }
     },

@@ -96,7 +96,15 @@ class TrackerTest {
     fun `notification filter keeps benefit mail and drops chatter`() {
         assertTrue(NotificationFilter.isRelevant("Social Security", "A new letter is in your account"))
         assertTrue(NotificationFilter.isRelevant("CVS", "Your prescription is ready"))
+        assertTrue(NotificationFilter.isRelevant("SSA", "Your SSDI payment was sent"))
+        assertTrue(NotificationFilter.isRelevant("Clinic", "Your appointment was rescheduled"))
+        assertTrue(NotificationFilter.isRelevant("Electric co", "Your bill is due Nov 3"))
         assertFalse(NotificationFilter.isRelevant("Alex", "lol see you tonight"))
+        // Short keywords must be whole words.
+        assertFalse(NotificationFilter.isRelevant("Alex sent you a message", "Mary: did you get my message?"))
+        assertFalse(NotificationFilter.isRelevant("Instagram", "Billy liked your photo"))
+        assertFalse(NotificationFilter.isRelevant("Discord", "Is it possible to come over? I'm learning java "))
+        assertFalse(NotificationFilter.isRelevant("Snapchat", "New snaps from Jo"))
     }
 
     @Test
@@ -118,7 +126,32 @@ class TextsTest {
         TextMessage("2026-10-20T18:00", person, outgoing, body, "SMS")
 
     @Test
+    fun `emoji are never split in half`() {
+        val s = "ok 👍"
+        assertEquals("ok ", s.safeTake(4)) // would otherwise end in half of the emoji
+        assertEquals(s, s.safeTake(5))
+        assertEquals("a\uFFFDb", "a\uD83Db".sanitizeUnicode())
+        assertEquals("fine 👍", "fine 👍".sanitizeUnicode())
+    }
+
+    @Test
+    fun `backlog is learned in oldest-first batches`() {
+        val many = (1..50).map { TextMessage("2026-10-%02d".format(it % 28 + 1), "Mom", false, "message $it ".repeat(10), "SMS", epochMillis = it.toLong()) }
+        val batches = TextFilter.chunks(many, maxChars = 2_000)
+        assertTrue(batches.size > 1)
+        assertEquals(50, batches.sumOf { it.size })
+        assertEquals(1L, batches.first().first().epochMillis)
+        assertTrue(batches.all { b -> b.sumOf { it.body.length + it.person.length + 40 } <= 2_000 })
+    }
+
+    @Test
     fun `verification codes never leave the phone`() {
+        assertTrue(TextFilter.isSecretCode("MyChart verification code: 512334"))
+        assertTrue(TextFilter.isSecretCode("SSA: your one-time security code is 771 023"))
+        assertTrue(TextFilter.isSecretCode("Use 4K7PQ2 to log in"))
+        assertFalse(TextFilter.isSecretCode("Social Security: your benefit of $1450 is scheduled for Nov 3"))
+        assertEquals("MyChart verification code: [code removed]", TextFilter.redactCodes("MyChart verification code: 512334"))
+        assertEquals("Your PT is Thursday at 2", TextFilter.redactCodes("Your PT is Thursday at 2"))
         assertTrue(TextFilter.isSecretCode("Your Chase verification code is 482913. Don't share it."))
         assertTrue(TextFilter.isSecretCode("G-123456 is your Google sign-in code"))
         assertFalse(TextFilter.isSecretCode("PT moved to Thursday at 2:30, room 4120"))

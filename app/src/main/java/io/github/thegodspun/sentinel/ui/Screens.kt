@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
@@ -86,6 +87,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.content.ContextCompat
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.haze
 import io.github.thegodspun.sentinel.MainActivity
 import io.github.thegodspun.sentinel.app
 import io.github.thegodspun.sentinel.core.TrackerItem
@@ -116,20 +119,25 @@ fun SentinelScreen(chat: ChatViewModel, refreshKey: Int, actions: MainActivity.A
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     val barSpace = if (imeVisible) 0.dp else TAB_BAR_HEIGHT + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
+    val hazeState = remember { HazeState() }
     SentinelBackground {
-        CompositionLocalProvider(LocalBottomBarSpace provides barSpace) {
-            Crossfade(targetState = tab, animationSpec = tween(220), label = "tab") { current ->
-                when (current) {
-                    0 -> ChatTab(chat, actions)
-                    1 -> HabitsTab(refreshKey, actions, onAsk = { tab = 0; chat.send(it) })
-                    2 -> TrackerTab(refreshKey)
-                    else -> SetupTab(refreshKey, actions)
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize().haze(hazeState)) {
+                CompositionLocalProvider(LocalBottomBarSpace provides barSpace) {
+                    Crossfade(targetState = tab, animationSpec = tween(220), label = "tab") { current ->
+                        when (current) {
+                            0 -> ChatTab(chat, actions)
+                            1 -> HabitsTab(refreshKey, actions, onAsk = { tab = 0; chat.send(it) })
+                            2 -> TrackerTab(refreshKey)
+                            else -> SetupTab(refreshKey, actions)
+                        }
+                    }
                 }
             }
-        }
-        // The tab bar floats over the content, which scrolls underneath the glass.
-        if (!imeVisible) {
-            Box(Modifier.align(Alignment.BottomCenter)) { PillNavBar(TABS, tab) { tab = it } }
+            // The tab bar floats over the content, which scrolls underneath the frosted glass.
+            if (!imeVisible) {
+                Box(Modifier.align(Alignment.BottomCenter)) { PillNavBar(TABS, tab, hazeState) { tab = it } }
+            }
         }
     }
 
@@ -158,6 +166,7 @@ private fun ApprovalDialog(question: String, onAllow: () -> Unit, onDecline: () 
         }
         val dark = isSystemInDarkTheme()
         val shape = RoundedCornerShape(32.dp)
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -184,6 +193,7 @@ private fun ApprovalDialog(question: String, onAllow: () -> Unit, onDecline: () 
                 SoftButton("Not now", onDecline, modifier = Modifier.weight(1f))
                 GradientButton("Allow", onAllow, modifier = Modifier.weight(1f))
             }
+        }
         }
     }
 }
@@ -250,6 +260,7 @@ private fun ChatTab(chat: ChatViewModel, actions: MainActivity.Actions) {
                 busy = status != null,
                 onSend = ::submit,
                 onTalk = actions::listen,
+                onStop = chat::cancel,
             )
             Spacer(Modifier.height(LocalBottomBarSpace.current))
         }
@@ -382,7 +393,14 @@ private fun Thinking(status: String) {
 }
 
 @Composable
-private fun Composer(draft: String, onDraft: (String) -> Unit, busy: Boolean, onSend: () -> Unit, onTalk: () -> Unit) {
+private fun Composer(
+    draft: String,
+    onDraft: (String) -> Unit,
+    busy: Boolean,
+    onSend: () -> Unit,
+    onTalk: () -> Unit,
+    onStop: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
@@ -407,7 +425,7 @@ private fun Composer(draft: String, onDraft: (String) -> Unit, busy: Boolean, on
             ),
         )
         Spacer(Modifier.width(10.dp))
-        if (draft.isBlank()) MicButton(busy = busy, onClick = onTalk) else SendButton(onSend)
+        if (draft.isBlank() || busy) MicButton(busy = busy, onClick = onTalk, onStop = onStop) else SendButton(onSend)
     }
 }
 

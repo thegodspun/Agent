@@ -59,12 +59,36 @@ fun phoneTools(context: Context): List<AgentTool> {
         )
 
     /** Looks up a phone number for a contact name; passes numbers through unchanged. */
+    /**
+     * Looks up the one contact meant by [who]. Numbers pass through. An exact name match wins;
+     * if several different people match, it fails with the choices so Claude can ask the user,
+     * rather than quietly picking someone.
+     */
     fun resolveNumber(who: String): Pair<String, String> {
         if (who.any { it.isDigit() } && who.none { it.isLetter() }) return who to who
         check(granted(Manifest.permission.READ_CONTACTS)) { "Contacts permission is not granted (Setup tab)." }
         val matches = findContacts(ctx, who)
         check(matches.isNotEmpty()) { "No contact matches \"$who\"." }
-        return matches.first()
+        val exact = matches.filter { it.second.equals(who.trim(), ignoreCase = true) }
+        val candidates = exact.ifEmpty { matches }
+        val people = candidates.map { it.second }.distinct()
+        check(people.size == 1) {
+            "More than one contact matches \"$who\": " + candidates.joinToString { "${it.second} (${it.first})" } +
+                ". Ask the user which one they mean."
+        }
+        return candidates.first()
+    }
+
+    /** "Alice Smith (555-0100)", or the raw text with a warning if it can't be resolved yet. */
+    fun describeRecipient(who: String?): String =
+        runCatching { resolveNumber(who.orEmpty()).let { (number, name) -> if (name == number) number else "$name ($number)" } }
+            .getOrElse { "\"$who\" (${it.message})" }
+
+    /** The app the user is looking at, for approval questions about screen actions. */
+    fun foregroundApp(): String {
+        val pkg = PhoneControlService.instance?.rootInActiveWindow?.packageName?.toString() ?: return "the current app"
+        return runCatching { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString() }
+            .getOrDefault(pkg)
     }
 
     return listOf(
@@ -121,7 +145,7 @@ fun phoneTools(context: Context): List<AgentTool> {
             override val properties = mapOf("to" to stringProp("Contact name or phone number"))
             override val required = listOf("to")
             override val requiresConfirmation = true
-            override fun confirmationText(input: ToolInput) = "Call ${input.stringOrNull("to")}?"
+            override fun confirmationText(input: ToolInput) = "Call ${describeRecipient(input.stringOrNull("to"))}?"
             override suspend fun run(input: ToolInput): String {
                 val (number, name) = resolveNumber(input.string("to"))
                 val action = if (granted(Manifest.permission.CALL_PHONE)) Intent.ACTION_CALL else Intent.ACTION_DIAL
@@ -138,7 +162,7 @@ fun phoneTools(context: Context): List<AgentTool> {
             override val required = listOf("to", "message")
             override val requiresConfirmation = true
             override fun confirmationText(input: ToolInput) =
-                "Text ${input.stringOrNull("to")}:\n\n\"${input.stringOrNull("message")}\""
+                "Text ${describeRecipient(input.stringOrNull("to"))}:\n\n\"${input.stringOrNull("message")}\""
             override suspend fun run(input: ToolInput): String {
                 val (number, name) = resolveNumber(input.string("to"))
                 val message = input.string("message")
@@ -248,6 +272,13 @@ fun phoneTools(context: Context): List<AgentTool> {
         object : AgentTool("open_url", "Open a web page in the browser.") {
             override val properties = mapOf("url" to stringProp("https:// address"))
             override val required = listOf("url")
+            // A link can carry information out in its address, so the user sees and approves it.
+            override val requiresConfirmation = true
+            override fun confirmationText(input: ToolInput): String {
+                val url = input.stringOrNull("url").orEmpty()
+                val host = runCatching { Uri.parse(url).host }.getOrNull() ?: url
+                return "Open a web page on $host?\n\n$url"
+            }
             override suspend fun run(input: ToolInput): String {
                 val url = input.string("url")
                 require(url.startsWith("https://") || url.startsWith("http://")) { "Only web addresses can be opened." }
@@ -299,7 +330,7 @@ fun phoneTools(context: Context): List<AgentTool> {
             override val properties = mapOf("label" to stringProp("Exact text or description of the element"))
             override val required = listOf("label")
             override val requiresConfirmation = true
-            override fun confirmationText(input: ToolInput) = "Tap \"${input.stringOrNull("label")}\" on screen?"
+            override fun confirmationText(input: ToolInput) = "Tap \"${input.stringOrNull("label")}\" in ${foregroundApp()}?"
             override suspend fun run(input: ToolInput): String {
                 // If it was approved from the notification, get the shade out of the way first.
                 control().dismissShade()
@@ -316,8 +347,16 @@ fun phoneTools(context: Context): List<AgentTool> {
                 "field" to stringProp("Label or hint of the field; omit for the focused field"),
             )
             override val required = listOf("text")
-            override suspend fun run(input: ToolInput): String =
-                if (control().type(input.string("text"), input.stringOrNull("field"))) "Typed." else "No text field found."
+            override val requiresConfirmation = true
+            override fun confirmationText(input: ToolInput): String {
+                val field = input.stringOrNull("field")?.let { "the \"$it\" field" } ?: "the selected field"
+                return "Type into $field in ${foregroundApp()}:\n\n\"${input.stringOrNull("text")}\""
+            }
+            override suspend fun run(input: ToolInput): String {
+                control().dismissShade()
+                delay(500)
+                return if (control().type(input.string("text"), input.stringOrNull("field"))) "Typed." else "No text field found."
+            }
         },
 
         object : AgentTool("scroll", "Scroll the current screen.") {

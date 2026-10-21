@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.thegodspun.sentinel"
         minSdk = 31
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.7.0"
+        versionCode = 8
+        versionName = "0.8.0"
     }
 
     signingConfigs {
@@ -74,6 +74,8 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-core")
+    // Real frosted glass: blurs what scrolls behind the tab bar (Android 12+).
+    implementation("dev.chrisbanes.haze:haze-android:1.1.1")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

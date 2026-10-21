@@ -13,7 +13,12 @@ import com.anthropic.models.beta.messages.BetaThinkingConfigAdaptive
 import com.anthropic.models.beta.messages.BetaToolResultBlockParam
 import com.anthropic.models.beta.messages.BetaWebSearchTool20260209
 import com.anthropic.models.beta.messages.MessageCreateParams
+import com.anthropic.core.Timeout
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.util.concurrent.ConcurrentHashMap
@@ -41,19 +46,36 @@ interface AgentListener {
 
 private val clients = ConcurrentHashMap<String, AnthropicClient>()
 
-/** One shared HTTP client per API key, so each conversation doesn't open its own connection pool. */
+/**
+ * One shared HTTP client per API key, so each conversation doesn't open its own connection pool.
+ * A stalled request gives up after 4 minutes and is retried once, rather than freezing the chat.
+ */
 fun clientFor(apiKey: String): AnthropicClient = clients.getOrPut(apiKey) {
     AnthropicOkHttpClient.builder()
         .apiKey(apiKey)
-        .timeout(Duration.ofMinutes(5))
-        .maxRetries(3)
+        .timeout(
+            Timeout.builder()
+                .connect(Duration.ofSeconds(20))
+                .write(Duration.ofSeconds(60))
+                .read(Duration.ofMinutes(4))
+                .request(Duration.ofMinutes(4))
+                .build()
+        )
+        .maxRetries(1)
         .build()
 }
 
 /** Abstraction over the Messages API call so the loop can be tested without a network. */
 fun interface MessageSender {
-    fun send(params: MessageCreateParams): BetaMessage
+    suspend fun send(params: MessageCreateParams): BetaMessage
 }
+
+/**
+ * Thrown when a request fails after some actions (calls, texts, taps) already happened. Those
+ * steps stay in the conversation so Claude knows they're done and doesn't repeat them.
+ */
+class ActionsCompletedException(val actions: List<String>, cause: Exception) :
+    Exception("Failed after completing: ${actions.joinToString()}", cause)
 
 /**
  * One conversation with Claude. The system prompt and tool list are frozen when the
@@ -64,13 +86,16 @@ class Conversation(
     private val config: AgentConfig,
     systemPrompt: String,
     tools: List<AgentTool>,
+    // The async client makes the request cancellable: cancelling the coroutine cancels the HTTP call.
     private val sender: MessageSender = clientFor(config.apiKey).let { client ->
-        MessageSender { client.beta().messages().create(it) }
+        MessageSender { client.async().beta().messages().create(it).await() }
     },
     private val maxSteps: Int = 25,
 ) {
     private val toolsByName = tools.associateBy { it.name }
     private val messages = mutableListOf<BetaMessageParam>()
+
+    val agentConfig: AgentConfig get() = config
 
     private val baseParams: MessageCreateParams.Builder = MessageCreateParams.builder()
         .model(config.model)
@@ -83,6 +108,8 @@ class Conversation(
                     .build()
             )
         )
+        // Also cache the growing history, so each step of a tool loop doesn't pay for it again.
+        .cacheControl(BetaCacheControlEphemeral.builder().build())
         .thinking(BetaThinkingConfigAdaptive.builder().build())
         .outputConfig(BetaOutputConfig.builder().effort(BetaOutputConfig.Effort.of(config.effort)).build())
         // If a safety classifier declines a request, retry it on Anthropic's recommended
@@ -97,28 +124,44 @@ class Conversation(
     val turnCount: Int get() = messages.size
 
     /**
-     * Sends [userText], runs any tools Claude asks for, and returns Claude's final reply.
-     * On failure the history is rolled back so the conversation stays usable.
+     * Sends [userText], runs any tools Claude asks for, and returns Claude's final reply, or
+     * [refusalReply] if the request is declined. On failure the history is rolled back to the
+     * last completed step so the conversation stays usable.
      */
-    suspend fun send(userText: String, listener: AgentListener = object : AgentListener {}): String =
-        withContext(Dispatchers.IO) {
-            val checkpoint = messages.size
-            try {
-                messages += userMessage(listOf(BetaContentBlockParam.ofText(userText)))
-                runLoop(listener) ?: run {
-                    rollback(checkpoint)
-                    "Sorry, I can't help with that request."
-                }
-            } catch (e: Exception) {
-                rollback(checkpoint)
-                throw e
+    suspend fun send(
+        userText: String,
+        listener: AgentListener = object : AgentListener {},
+        refusalReply: String = "Sorry, I can't help with that request.",
+    ): String = withContext(Dispatchers.IO) {
+        val state = LoopState(checkpoint = messages.size)
+        try {
+            messages += userMessage(listOf(BetaContentBlockParam.ofText(userText.sanitizeUnicode())))
+            runLoop(listener, state) ?: run {
+                rollback(state.safePoint)
+                refusalReply
             }
+        } catch (e: CancellationException) {
+            rollback(state.safePoint)
+            throw e
+        } catch (e: Exception) {
+            rollback(state.safePoint)
+            if (state.actions.isNotEmpty()) throw ActionsCompletedException(state.actions.toList(), e)
+            throw e
         }
+    }
+
+    private class LoopState(checkpoint: Int) {
+        /** History up to here is complete and valid: either the start, or right after a set of tool results. */
+        var safePoint = checkpoint
+        /** Approved actions (calls, texts, taps) that already happened in this request. */
+        val actions = mutableListOf<String>()
+    }
 
     /** Returns the final text, or null if the request was declined. */
-    private suspend fun runLoop(listener: AgentListener): String? {
+    private suspend fun runLoop(listener: AgentListener, state: LoopState): String? {
         val replyParts = mutableListOf<String>()
-        repeat(maxSteps) {
+        for (step in 0 until maxSteps) {
+            currentCoroutineContext().ensureActive()
             val response = sender.send(baseParams.messages(messages.toList()).build())
             val stopReason = response.stopReason().orElse(null)
             if (stopReason == BetaStopReason.REFUSAL) return null
@@ -128,20 +171,25 @@ class Conversation(
 
             val toolUses = response.content().mapNotNull { it.toolUse().orElse(null) }
             when {
+                // Cut off mid-call: the arguments may be incomplete, so don't run anything.
+                stopReason == BetaStopReason.MAX_TOKENS && toolUses.isNotEmpty() -> {
+                    messages += userMessage(toolUses.map { use ->
+                        toolResult(use.id(), "Not run: your output was cut off by the length limit. Make the call again with shorter input.", true)
+                    })
+                    state.safePoint = messages.size
+                    replyParts.clear()
+                }
                 toolUses.isNotEmpty() -> {
                     val results = toolUses.map { use ->
+                        currentCoroutineContext().ensureActive()
                         listener.onToolStarted(use.name())
                         val outcome = runTool(use.name(), use._input().convert(Map::class.java), listener)
-                        BetaContentBlockParam.ofToolResult(
-                            BetaToolResultBlockParam.builder()
-                                .toolUseId(use.id())
-                                .content(outcome.text)
-                                .isError(outcome.isError)
-                                .build()
-                        )
+                        if (outcome.action) state.actions += use.name()
+                        toolResult(use.id(), outcome.text, outcome.isError)
                     }
                     // Every result goes back in a single message.
                     messages += userMessage(results)
+                    state.safePoint = messages.size
                     // Text written before a tool call is a working note, not the answer.
                     replyParts.clear()
                 }
@@ -156,7 +204,17 @@ class Conversation(
             "\n\n(I stopped after $maxSteps steps. Ask me to continue if needed.)"
     }
 
-    private data class ToolOutcome(val text: String, val isError: Boolean)
+    private fun toolResult(id: String, text: String, isError: Boolean): BetaContentBlockParam =
+        BetaContentBlockParam.ofToolResult(
+            BetaToolResultBlockParam.builder()
+                .toolUseId(id)
+                .content(text.sanitizeUnicode())
+                .isError(isError)
+                .build()
+        )
+
+    /** [action] is true when an approved real-world action (call, text, tap…) ran. */
+    private data class ToolOutcome(val text: String, val isError: Boolean, val action: Boolean = false)
 
     private suspend fun runTool(name: String, rawInput: Map<*, *>?, listener: AgentListener): ToolOutcome {
         val tool = toolsByName[name] ?: return ToolOutcome("Unknown tool: $name", true)
@@ -165,8 +223,10 @@ class Conversation(
             if (tool.requiresConfirmation && !listener.confirm(tool.confirmationText(input))) {
                 ToolOutcome("The user declined this action. Do not retry it unless they ask.", false)
             } else {
-                ToolOutcome(tool.run(input), false)
+                ToolOutcome(tool.run(input), false, action = tool.requiresConfirmation)
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             ToolOutcome("Error: ${e.message ?: e.javaClass.simpleName}", true)
         }

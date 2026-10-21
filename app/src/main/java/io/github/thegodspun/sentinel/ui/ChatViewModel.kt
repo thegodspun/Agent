@@ -10,6 +10,7 @@ import com.anthropic.errors.AnthropicServiceException
 import com.anthropic.errors.RateLimitException
 import com.anthropic.errors.UnauthorizedException
 import io.github.thegodspun.sentinel.app
+import io.github.thegodspun.sentinel.core.ActionsCompletedException
 import io.github.thegodspun.sentinel.core.AgentListener
 import io.github.thegodspun.sentinel.core.Conversation
 import io.github.thegodspun.sentinel.core.HabitProfile
@@ -19,7 +20,9 @@ import io.github.thegodspun.sentinel.core.describeNow
 import io.github.thegodspun.sentinel.core.habitTools
 import io.github.thegodspun.sentinel.service.ApprovalCenter
 import io.github.thegodspun.sentinel.tools.phoneTools
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,6 +51,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val confirmation: StateFlow<Confirmation?> = _confirmation.asStateFlow()
 
     private var conversation: Conversation? = null
+    private var job: Job? = null
 
     private var tts: TextToSpeech? = null
     private var ttsReady = false
@@ -90,11 +94,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
         _lines.update { it + ChatLine(true, text) }
         _status.value = "Thinking…"
-        viewModelScope.launch {
+        job = viewModelScope.launch {
             val reply = try {
-                val convo = conversation ?: newConversation().also { conversation = it }
+                // A changed API key, model or effort in Setup takes effect right away.
+                val config = app.settings.agentConfig()
+                val convo = conversation?.takeIf { it.agentConfig == config } ?: newConversation().also { conversation = it }
                 convo.send("[${describeNow(LocalDateTime.now())}]\n$text", listener)
+            } catch (e: CancellationException) {
+                "Stopped."
+            } catch (e: ActionsCompletedException) {
+                "I lost the connection partway through, but some steps already happened: " +
+                    e.actions.joinToString { it.replace('_', ' ') } +
+                    ". Check those before asking me to do them again."
             } catch (e: UnauthorizedException) {
+                conversation = null
                 "Your API key was rejected. Check it in the Setup tab."
             } catch (e: RateLimitException) {
                 "Claude is rate-limiting this API key right now. Wait a minute and try again."
@@ -106,9 +119,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 "Something went wrong: ${e.message ?: e.javaClass.simpleName}"
             }
             _status.value = null
+            job = null
             _lines.update { it + ChatLine(false, reply.ifBlank { "Done." }) }
             if (app.settings.speakReplies) speak(reply)
         }
+    }
+
+    /** Stops the request in progress, including any open network call. */
+    fun cancel() {
+        _confirmation.value?.answer?.complete(false)
+        job?.cancel()
     }
 
     /** Fills the chat with sample lines, for screenshot tests. */

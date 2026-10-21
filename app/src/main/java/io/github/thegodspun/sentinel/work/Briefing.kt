@@ -48,10 +48,10 @@ object Briefing {
                 ChronoUnit.DAYS.between(LocalDate.parse(settings.lastWeeklyReview), today) >= 7)
 
         val conversation = Conversation(
-            config = settings.agentConfig(effortOverride = "medium"),
+            config = settings.agentConfig(effortOverride = "medium").copy(webSearch = false),
             systemPrompt = Prompts.background(settings.aboutMe, app.notes.all()),
-            tools = coreTools(app.tracker, app.notes) { LocalDateTime.now() } +
-                habitTools(app.habits) { LocalDateTime.now() },
+            tools = coreTools(app.tracker, app.notes, provenance = "a notification") { LocalDateTime.now() } +
+                habitTools(app.habits, background = true) { LocalDateTime.now() },
         )
         val text = conversation.send(
             Prompts.briefing(
@@ -61,10 +61,12 @@ object Briefing {
                 notifications = pending,
                 habitProfile = if (settings.habitLearning) HabitProfile.describe(habits, today) else "(habit learning is off)",
                 weeklyReview = weekly,
-            )
+            ),
+            refusalReply = "",
         )
+        if (text.isBlank()) return
 
-        app.inbox.drop(pending.size)
+        app.inbox.remove(pending.map { it.id }.toSet())
         settings.lastBriefingAt = System.currentTimeMillis()
         settings.lastBriefing = text
         if (weekly) settings.lastWeeklyReview = today.toString()

@@ -21,9 +21,12 @@ object TextReader {
     fun hasAccess(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
 
-    /** SMS sent or received after [sinceMillis], oldest first, with verification codes removed. */
-    fun since(context: Context, sinceMillis: Long, limit: Int = 500): List<TextMessage> =
-        query(context, "${Telephony.Sms.DATE} > ?", arrayOf(sinceMillis.toString()), limit).asReversed()
+    /**
+     * SMS sent or received after [sinceMillis], oldest first, with verification codes removed.
+     * Taking the oldest [limit] means a big backlog is worked through in order across runs.
+     */
+    fun since(context: Context, sinceMillis: Long, limit: Int = 2_000): List<TextMessage> =
+        query(context, "${Telephony.Sms.DATE} > ?", arrayOf(sinceMillis.toString()), limit, oldestFirst = true)
 
     /** Newest-first search by words in the message and/or the person's name or number. */
     fun search(context: Context, text: String?, person: String?, days: Int, limit: Int = 40): List<TextMessage> {
@@ -40,14 +43,20 @@ object TextReader {
         else rows.filter { it.person.contains(person, ignoreCase = true) }.take(limit)
     }
 
-    private fun query(context: Context, selection: String, args: Array<String>, limit: Int): List<TextMessage> {
+    private fun query(
+        context: Context,
+        selection: String,
+        args: Array<String>,
+        limit: Int,
+        oldestFirst: Boolean = false,
+    ): List<TextMessage> {
         if (!hasAccess(context)) return emptyList()
         val names = mutableMapOf<String, String>()
         val out = mutableListOf<TextMessage>()
         context.contentResolver.query(
             Telephony.Sms.CONTENT_URI,
             arrayOf(Telephony.Sms.DATE, Telephony.Sms.ADDRESS, Telephony.Sms.BODY, Telephony.Sms.TYPE),
-            selection, args, "${Telephony.Sms.DATE} DESC",
+            selection, args, "${Telephony.Sms.DATE} " + if (oldestFirst) "ASC" else "DESC",
         )?.use { c ->
             while (c.moveToNext() && out.size < limit) {
                 val body = c.getString(2).orEmpty()
@@ -60,6 +69,7 @@ object TextReader {
                     outgoing = c.getInt(3) == Telephony.Sms.MESSAGE_TYPE_SENT,
                     body = body,
                     source = "SMS",
+                    epochMillis = c.getLong(0),
                 )
             }
         }

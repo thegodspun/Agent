@@ -96,6 +96,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("read_chats_on_screen", true)
         set(value) = prefs.edit().putBoolean("read_chats_on_screen", value).apply()
 
+    /** More texts were waiting than one run handles; the next hourly check continues. */
+    var textsBacklog: Boolean
+        get() = prefs.getBoolean("texts_backlog", false)
+        set(value) = prefs.edit().putBoolean("texts_backlog", value).apply()
+
     var lastTextsLearnedAt: Long
         get() = prefs.getLong("last_texts_learned_at", 0)
         set(value) = prefs.edit().putLong("last_texts_learned_at", value).apply()

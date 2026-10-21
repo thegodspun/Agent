@@ -37,7 +37,7 @@ class SentinelApp : Application() {
         notes = NotesStore(File(filesDir, "notes.txt"))
         inbox = InboxStore(File(filesDir, "inbox.json"))
         habits = HabitStore(File(filesDir, "habits.json"))
-        messages = InboxStore(File(filesDir, "messages.json"), maxItems = 300)
+        messages = InboxStore(File(filesDir, "messages.json"), maxItems = 1_000)
         seenOnScreen = SeenStore(File(filesDir, "seen_on_screen.json"))
         Notifications.createChannels(this)
         // Fails only where WorkManager isn't set up, such as screenshot tests.

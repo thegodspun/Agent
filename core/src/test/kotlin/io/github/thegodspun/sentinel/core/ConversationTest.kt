@@ -34,12 +34,15 @@ class ConversationTest {
     private fun toolUse(id: String, name: String, input: String) =
         """{"type":"tool_use","id":"$id","name":"$name","input":$input}"""
 
-    /** Replies with canned responses and records each request. */
-    private class FakeSender(private val replies: List<BetaMessage>) : MessageSender {
+    /** Replies with canned responses (or throws them) and records each request. */
+    private class FakeSender(private val replies: List<Any>) : MessageSender {
         val requests = mutableListOf<MessageCreateParams>()
-        override fun send(params: MessageCreateParams): BetaMessage {
+        override suspend fun send(params: MessageCreateParams): BetaMessage {
             requests += params
-            return replies[requests.size - 1]
+            return when (val r = replies[requests.size - 1]) {
+                is Exception -> throw r
+                else -> r as BetaMessage
+            }
         }
     }
 
@@ -121,5 +124,47 @@ class ConversationTest {
         val failing = Conversation(config, "system", tools, { throw IllegalStateException("offline") })
         assertFailsWith<IllegalStateException> { failing.send("hello") }
         assertEquals(0, failing.turnCount)
+    }
+
+    @Test
+    fun `a tool call cut off by the length limit is not run`() = runTest {
+        val sender = FakeSender(
+            listOf(
+                message("max_tokens", toolUse("t1", "tracker_add", """{"title":"Call Dana at 555-01","category":"task"}""")),
+                message("end_turn", text("Saved.")),
+            )
+        )
+        Conversation(config, "system", tools, sender).send("remind me to call Dana")
+        assertTrue(tracker.all().isEmpty())
+        val result = sender.requests[1].messages()[2].content().asBetaContentBlockParams().single().asToolResult()
+        assertTrue(result.isError().get())
+    }
+
+    @Test
+    fun `completed actions survive a later failure so they aren't repeated`() = runTest {
+        var sent = 0
+        val text = object : AgentTool("send_text", "Text someone") {
+            override val properties = mapOf("to" to stringProp("who"))
+            override val requiresConfirmation = true
+            override suspend fun run(input: ToolInput): String { sent++; return "sent" }
+        }
+        val allow = object : AgentListener { override suspend fun confirm(question: String) = true }
+        val sender = FakeSender(
+            listOf(
+                message("tool_use", toolUse("t1", "send_text", """{"to":"Dana"}""")),
+                IllegalStateException("connection lost"),
+            )
+        )
+        val conversation = Conversation(config, "system", listOf(text), sender)
+        val e = assertFailsWith<ActionsCompletedException> { conversation.send("text Dana I'm late", allow) }
+        assertEquals(listOf("send_text"), e.actions)
+        assertEquals(1, sent)
+        assertEquals(3, conversation.turnCount) // the request, the call and its result are kept
+    }
+
+    @Test
+    fun `background runs can choose what a refusal returns`() = runTest {
+        val sender = FakeSender(listOf(message("refusal")))
+        assertEquals("", Conversation(config, "system", tools, sender).send("x", refusalReply = ""))
     }
 }
