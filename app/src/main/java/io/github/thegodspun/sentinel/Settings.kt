@@ -74,6 +74,15 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("habit_learning", true)
         set(value) = prefs.edit().putBoolean("habit_learning", value).apply()
 
+    /** Learn about the user from their texts (SMS history and incoming messaging-app notifications). */
+    var learnFromTexts: Boolean
+        get() = prefs.getBoolean("learn_from_texts", true)
+        set(value) = prefs.edit().putBoolean("learn_from_texts", value).apply()
+
+    var lastTextsLearnedAt: Long
+        get() = prefs.getLong("last_texts_learned_at", 0)
+        set(value) = prefs.edit().putLong("last_texts_learned_at", value).apply()
+
     /** Send every notification to the sentinel, not only ones matching benefit/health keywords. */
     var reviewAllNotifications: Boolean
         get() = prefs.getBoolean("review_all", false)

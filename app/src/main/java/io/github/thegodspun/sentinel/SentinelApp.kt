@@ -21,6 +21,10 @@ class SentinelApp : Application() {
     lateinit var habits: HabitStore
         private set
 
+    /** Incoming messages from messaging-app notifications, waiting to be learned from. */
+    lateinit var messages: InboxStore
+        private set
+
     override fun onCreate() {
         super.onCreate()
         settings = Settings(this)
@@ -28,6 +32,7 @@ class SentinelApp : Application() {
         notes = NotesStore(File(filesDir, "notes.txt"))
         inbox = InboxStore(File(filesDir, "inbox.json"))
         habits = HabitStore(File(filesDir, "habits.json"))
+        messages = InboxStore(File(filesDir, "messages.json"), maxItems = 300)
         Notifications.createChannels(this)
         SentinelWorker.schedule(this)
         if (settings.alwaysOn) AgentService.start(this)

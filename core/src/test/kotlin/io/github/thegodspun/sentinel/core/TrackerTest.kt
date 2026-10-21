@@ -112,3 +112,39 @@ class TrackerTest {
         assertEquals(listOf("message 4"), inbox.all().map { it.text })
     }
 }
+
+class TextsTest {
+    private fun msg(body: String, person: String = "Mom", outgoing: Boolean = false) =
+        TextMessage("2026-10-20T18:00", person, outgoing, body, "SMS")
+
+    @Test
+    fun `verification codes never leave the phone`() {
+        assertTrue(TextFilter.isSecretCode("Your Chase verification code is 482913. Don't share it."))
+        assertTrue(TextFilter.isSecretCode("G-123456 is your Google sign-in code"))
+        assertFalse(TextFilter.isSecretCode("PT moved to Thursday at 2:30, room 4120"))
+        assertFalse(TextFilter.isSecretCode("Can you call me back about the wheelchair code? lol"))
+        val kept = TextFilter.prepare(listOf(msg("Your code is 1234 for login"), msg("Dinner Sunday?")))
+        assertEquals(listOf("Dinner Sunday?"), kept.map { it.body })
+    }
+
+    @Test
+    fun `prepare keeps the newest messages within budget`() {
+        val many = (1..100).map { msg("message number $it ".repeat(5)) }
+        val kept = TextFilter.prepare(many, maxChars = 1_000)
+        assertTrue(kept.size in 2..20)
+        assertEquals(many.last().body.trim(), kept.last().body.trim())
+    }
+
+    @Test
+    fun `format shows direction`() {
+        val text = TextFilter.format(listOf(msg("On my way", "Dana (nurse)", outgoing = true)))
+        assertEquals("[2026-10-20T18:00] (me → Dana (nurse), SMS) On my way", text)
+    }
+
+    @Test
+    fun `notes replace duplicates and cap their count`() {
+        val notes = NotesStore(File(Files.createTempDirectory("n").toFile(), "notes.txt"), maxFacts = 3)
+        listOf("a", "b", "c", "A", "d").forEach(notes::add)
+        assertEquals(listOf("c", "A", "d"), notes.all())
+    }
+}

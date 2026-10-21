@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit
  * 2. Deadline reminders, worked out on the phone with no network or AI cost.
  * 3. Review of queued notifications by Claude, which adds any dates it finds to the tracker.
  * 4. The daily briefing, if the wake-up check didn't already send it.
+ * 5. Once a day, learning about the user from their recent texts.
  * While the user is probably asleep, alerts wait for the wake-up briefing.
  */
 class SentinelWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
@@ -47,6 +48,7 @@ class SentinelWorker(context: Context, params: WorkerParameters) : CoroutineWork
         try {
             reviewInbox()
             Briefing.deliverIfDue(applicationContext)
+            ContextLearner.runIfDue(applicationContext)
             Result.success()
         } catch (e: Exception) {
             Log.w(TAG, "Sentinel check failed", e)

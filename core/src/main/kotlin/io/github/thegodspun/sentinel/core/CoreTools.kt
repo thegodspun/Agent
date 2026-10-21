@@ -121,8 +121,8 @@ fun describeNow(now: LocalDateTime): String =
         now.format(DateTimeFormatter.ofPattern("MMMM d, yyyy 'at' h:mm a", Locale.US)) +
         " (ISO ${now.withNano(0).withSecond(0)})"
 
-/** Long-term facts about the user, one per line. */
-class NotesStore(private val file: File) {
+/** Long-term facts about the user, one per line. The oldest drop off past [maxFacts]. */
+class NotesStore(private val file: File, private val maxFacts: Int = 200) {
     private val lock = Any()
 
     fun all(): List<String> = synchronized(lock) {
@@ -131,7 +131,14 @@ class NotesStore(private val file: File) {
 
     fun add(fact: String) = synchronized(lock) {
         file.parentFile?.mkdirs()
-        file.appendText(fact.replace('\n', ' ').trim() + "\n")
+        val clean = fact.replace('\n', ' ').trim()
+        val facts = (all().filterNot { it.equals(clean, ignoreCase = true) } + clean).takeLast(maxFacts)
+        file.writeText(facts.joinToString("\n", postfix = "\n"))
+    }
+
+    fun removeExact(fact: String) = synchronized(lock) {
+        val kept = all().filterNot { it == fact }
+        file.writeText(kept.joinToString("\n", postfix = if (kept.isEmpty()) "" else "\n"))
     }
 
     fun remove(text: String): Int = synchronized(lock) {

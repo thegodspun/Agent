@@ -132,6 +132,7 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.CALL_PHONE,
             Manifest.permission.SEND_SMS,
+            Manifest.permission.READ_SMS,
             Manifest.permission.READ_CALENDAR,
         )
     }

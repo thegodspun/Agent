@@ -153,6 +153,22 @@ fun HabitsTab(refreshKey: Int, actions: MainActivity.Actions, onAsk: (String) ->
             )
         }
         data.insights.reversed().forEach { InsightRow(it) }
+
+        Heading("What Sentinel knows about you")
+        val facts = remember(refreshKey, version) { app.notes.all() }
+        if (facts.isEmpty()) {
+            Text(
+                "Nothing saved yet. Sentinel saves facts here from your chats and, if you allow it, your texts. " +
+                    "Delete anything that's wrong or that you'd rather it didn't keep.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        facts.reversed().forEach { fact ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(fact, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+                IconButton(onClick = { app.notes.removeExact(fact); version++ }) { Icon(Icons.Filled.Delete, "Forget this") }
+            }
+        }
         Spacer(Modifier.height(16.dp))
     }
 }

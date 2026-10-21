@@ -343,6 +343,7 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
     var briefingHour by remember { mutableStateOf(settings.briefingHour.takeIf { it >= 0 }?.toString().orEmpty()) }
     var wakeBriefing by remember { mutableStateOf(settings.wakeBriefing) }
     var habitLearning by remember { mutableStateOf(settings.habitLearning) }
+    var learnFromTexts by remember { mutableStateOf(settings.learnFromTexts) }
     var saved by remember { mutableStateOf(false) }
 
     val status = remember(refreshKey) { PermissionStatus.read(context) }
@@ -385,6 +386,9 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
         ToggleRow("Review all notifications, not only benefit/health/money ones", reviewAll) { reviewAll = it; saved = false }
         ToggleRow("Brief me when I wake up and pick up my phone", wakeBriefing) { wakeBriefing = it; saved = false }
         ToggleRow("Learn my habits and coach me (needs Usage access)", habitLearning) { habitLearning = it; saved = false }
+        ToggleRow("Learn about me from my texts (needs Text messages permission)", learnFromTexts) {
+            learnFromTexts = it; saved = false
+        }
         OutlinedTextField(
             value = briefingHour, onValueChange = { briefingHour = it.filter(Char::isDigit).take(2); saved = false },
             label = {
@@ -412,6 +416,7 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
                 settings.briefingHour = briefingHour.toIntOrNull()?.coerceIn(0, 23) ?: -1
                 settings.wakeBriefing = wakeBriefing
                 settings.habitLearning = habitLearning
+                settings.learnFromTexts = learnFromTexts
                 if (alwaysOn) AgentService.start(context) else AgentService.stop(context)
                 saved = true
             },
@@ -431,7 +436,7 @@ private fun SetupTab(refreshKey: Int, actions: MainActivity.Actions) {
                 "at the top right, then \"Allow restricted settings\", and try again.",
             style = MaterialTheme.typography.bodyMedium,
         )
-        PermissionRow("Notifications, microphone, contacts, calls, texts, calendar", status.runtime) {
+        PermissionRow("Notifications, microphone, contacts, calls, sending and reading texts, calendar", status.runtime) {
             actions.requestPermissions()
         }
         PermissionRow("Notification access (lets the sentinel spot deadlines)", status.notificationAccess) {
