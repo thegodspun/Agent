@@ -34,18 +34,45 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("always_on", true)
         set(value) = prefs.edit().putBoolean("always_on", value).apply()
 
-    /** Hour of day (0-23) for the morning briefing, or -1 to turn it off. */
+    /** Brief the user when they first pick up the phone after sleeping, instead of at a fixed hour. */
+    var wakeBriefing: Boolean
+        get() = prefs.getBoolean("wake_briefing", true)
+        set(value) = prefs.edit().putBoolean("wake_briefing", value).apply()
+
+    /**
+     * With wake briefings on: brief anyway by this hour if no wake-up was noticed (until the usual
+     * wake time is learned). With them off: the fixed briefing hour. -1 turns briefings off.
+     */
     var briefingHour: Int
-        get() = prefs.getInt("briefing_hour", 8)
+        get() = prefs.getInt("briefing_hour", 10)
         set(value) = prefs.edit().putInt("briefing_hour", value).apply()
 
-    var lastBriefingDate: String
-        get() = prefs.getString("last_briefing", "").orEmpty()
-        set(value) = prefs.edit().putString("last_briefing", value).apply()
+    /** Hours the screen must be off before an unlock counts as waking up. */
+    var minSleepHours: Int
+        get() = prefs.getInt("min_sleep_hours", 4)
+        set(value) = prefs.edit().putInt("min_sleep_hours", value).apply()
+
+    var lastBriefingAt: Long
+        get() = prefs.getLong("last_briefing_at", 0)
+        set(value) = prefs.edit().putLong("last_briefing_at", value).apply()
 
     var lastBriefing: String
         get() = prefs.getString("last_briefing_text", "").orEmpty()
         set(value) = prefs.edit().putString("last_briefing_text", value).apply()
+
+    var lastWeeklyReview: String
+        get() = prefs.getString("last_weekly_review", "").orEmpty()
+        set(value) = prefs.edit().putString("last_weekly_review", value).apply()
+
+    /** When the screen last turned off, recorded by the always-on service. */
+    var lastScreenOff: Long
+        get() = prefs.getLong("last_screen_off", 0)
+        set(value) = prefs.edit().putLong("last_screen_off", value).apply()
+
+    /** Learn habits from app usage, screen time and sleep patterns. */
+    var habitLearning: Boolean
+        get() = prefs.getBoolean("habit_learning", true)
+        set(value) = prefs.edit().putBoolean("habit_learning", value).apply()
 
     /** Send every notification to the sentinel, not only ones matching benefit/health keywords. */
     var reviewAllNotifications: Boolean

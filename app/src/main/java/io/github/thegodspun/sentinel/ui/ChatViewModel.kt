@@ -11,9 +11,11 @@ import com.anthropic.errors.UnauthorizedException
 import io.github.thegodspun.sentinel.app
 import io.github.thegodspun.sentinel.core.AgentListener
 import io.github.thegodspun.sentinel.core.Conversation
+import io.github.thegodspun.sentinel.core.HabitProfile
 import io.github.thegodspun.sentinel.core.Prompts
 import io.github.thegodspun.sentinel.core.coreTools
 import io.github.thegodspun.sentinel.core.describeNow
+import io.github.thegodspun.sentinel.core.habitTools
 import io.github.thegodspun.sentinel.tools.phoneTools
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.LocalDate
 import java.time.LocalDateTime
 
 data class ChatLine(val fromUser: Boolean, val text: String)
@@ -119,8 +122,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val settings = app.settings
         return Conversation(
             config = settings.agentConfig(),
-            systemPrompt = Prompts.chat(settings.aboutMe, app.notes.all(), describeNow(LocalDateTime.now())),
-            tools = coreTools(app.tracker, app.notes) { LocalDateTime.now() } + phoneTools(getApplication<Application>()),
+            systemPrompt = Prompts.chat(
+                aboutMe = settings.aboutMe,
+                facts = app.notes.all(),
+                habitProfile = if (settings.habitLearning) {
+                    HabitProfile.describe(app.habits.data(), LocalDate.now())
+                } else {
+                    "(habit learning is off)"
+                },
+                now = describeNow(LocalDateTime.now()),
+            ),
+            tools = coreTools(app.tracker, app.notes) { LocalDateTime.now() } +
+                habitTools(app.habits) { LocalDateTime.now() } +
+                phoneTools(getApplication<Application>()),
         )
     }
 
@@ -138,6 +152,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             "read_screen" to "Reading the screen…",
             "open_app" to "Opening the app…",
             "calendar_upcoming" to "Checking your calendar…",
+            "habit_report" to "Looking at your habits…",
+            "save_habit_insight" to "Noting that…",
         )
     }
 }

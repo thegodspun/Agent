@@ -19,6 +19,7 @@ import io.github.thegodspun.sentinel.core.intProp
 import io.github.thegodspun.sentinel.core.stringProp
 import io.github.thegodspun.sentinel.service.PhoneControlService
 import kotlinx.coroutines.delay
+import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -155,23 +156,7 @@ fun phoneTools(context: Context): List<AgentTool> {
                 check(granted(Manifest.permission.READ_CALENDAR)) { "Calendar permission is not granted (Setup tab)." }
                 val days = (input.intOrNull("days") ?: 7).coerceIn(1, 90)
                 val start = System.currentTimeMillis()
-                val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
-                    ContentUris.appendId(it, start)
-                    ContentUris.appendId(it, start + days * 86_400_000L)
-                }.build()
-                val fmt = DateTimeFormatter.ofPattern("EEE MMM d, h:mm a", Locale.US)
-                val events = mutableListOf<String>()
-                ctx.contentResolver.query(
-                    uri,
-                    arrayOf(CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.EVENT_LOCATION),
-                    null, null, "${CalendarContract.Instances.BEGIN} ASC",
-                )?.use { c ->
-                    while (c.moveToNext() && events.size < 50) {
-                        val begin = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(c.getLong(1)), ZoneId.systemDefault())
-                        val location = c.getString(2)?.takeIf { it.isNotBlank() }?.let { " @ $it" }.orEmpty()
-                        events += "${begin.format(fmt)}: ${c.getString(0)}$location"
-                    }
-                }
+                val events = readCalendar(ctx, start, start + days * 86_400_000L)
                 return if (events.isEmpty()) "No events in the next $days days." else events.joinToString("\n")
             }
         },
@@ -300,6 +285,38 @@ fun phoneTools(context: Context): List<AgentTool> {
             }
         },
     )
+}
+
+/**
+ * Calendar events overlapping [from]..[to] as "Tue Nov 3, 2:30 PM: Title @ Place".
+ * Returns an empty list without calendar permission.
+ */
+fun readCalendar(context: Context, from: Long, to: Long, max: Int = 50): List<String> {
+    if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+        return emptyList()
+    }
+    val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
+        ContentUris.appendId(it, from)
+        ContentUris.appendId(it, to)
+    }.build()
+    val fmt = DateTimeFormatter.ofPattern("EEE MMM d, h:mm a", Locale.US)
+    val events = mutableListOf<String>()
+    context.contentResolver.query(
+        uri,
+        arrayOf(
+            CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN,
+            CalendarContract.Instances.EVENT_LOCATION, CalendarContract.Instances.ALL_DAY,
+        ),
+        null, null, "${CalendarContract.Instances.BEGIN} ASC",
+    )?.use { c ->
+        while (c.moveToNext() && events.size < max) {
+            val begin = LocalDateTime.ofInstant(Instant.ofEpochMilli(c.getLong(1)), ZoneId.systemDefault())
+            val whenText = if (c.getInt(3) == 1) begin.format(DateTimeFormatter.ofPattern("EEE MMM d", Locale.US)) + " (all day)" else begin.format(fmt)
+            val location = c.getString(2)?.takeIf { it.isNotBlank() }?.let { " @ $it" }.orEmpty()
+            events += "$whenText: ${c.getString(0)}$location"
+        }
+    }
+    return events
 }
 
 /** Returns (number, display name) pairs for contacts whose name contains [name]. */

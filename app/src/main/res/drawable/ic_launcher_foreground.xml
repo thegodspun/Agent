@@ -3,6 +3,7 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- White shield with a green-eyed watch, on the blue adaptive background. -->
     <group
         android:scaleX="2.5"
         android:scaleY="2.5"
@@ -10,6 +11,15 @@
         android:translateY="24">
         <path
             android:fillColor="#FFFFFFFF"
-            android:pathData="M12,1L3,5v6c0,5.55 3.84,10.74 9,12 5.16,-1.26 9,-6.45 9,-12V5L12,1zM12,7c2.76,0 5.11,1.68 6,4 -0.89,2.32 -3.24,4 -6,4s-5.11,-1.68 -6,-4c0.89,-2.32 3.24,-4 6,-4zM12,9a2,2 0,1 0,0 4a2,2 0,1 0,0 -4z" />
+            android:pathData="M12,1L3,5v6c0,5.55 3.84,10.74 9,12 5.16,-1.26 9,-6.45 9,-12V5L12,1z" />
+        <path
+            android:fillColor="#FF0D3B7A"
+            android:pathData="M12,7c2.76,0 5.11,1.68 6,4 -0.89,2.32 -3.24,4 -6,4s-5.11,-1.68 -6,-4c0.89,-2.32 3.24,-4 6,-4z" />
+        <path
+            android:fillColor="#FF2EAD4B"
+            android:pathData="M12,8.6a2.4,2.4 0,1 0,0 4.8a2.4,2.4 0,1 0,0 -4.8z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M12,10a1,1 0,1 0,0 2a1,1 0,1 0,0 -2z" />
     </group>
 </vector>

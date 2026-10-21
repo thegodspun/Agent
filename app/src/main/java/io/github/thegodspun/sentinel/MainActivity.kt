@@ -12,14 +12,11 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.ui.graphics.Color
 import io.github.thegodspun.sentinel.ui.ChatViewModel
+import io.github.thegodspun.sentinel.habits.UsageCollector
 import io.github.thegodspun.sentinel.ui.SentinelScreen
+import io.github.thegodspun.sentinel.ui.SentinelTheme
 
 class MainActivity : ComponentActivity() {
     private val chat: ChatViewModel by viewModels()
@@ -41,12 +38,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val colors = if (isSystemInDarkTheme()) {
-                darkColorScheme(primary = Color(0xFF9CC3F0))
-            } else {
-                lightColorScheme(primary = Color(0xFF1B3A5C))
-            }
-            MaterialTheme(colorScheme = colors) {
+            SentinelTheme {
                 SentinelScreen(
                     chat = chat,
                     refreshKey = refresh.intValue,
@@ -98,6 +90,8 @@ class MainActivity : ComponentActivity() {
         override fun openAccessibility() =
             settingsLauncher.launch(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS))
 
+        override fun openUsageAccess() = settingsLauncher.launch(UsageCollector.settingsIntent())
+
         override fun openAppInfo() = settingsLauncher.launch(
             Intent(AndroidSettings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
         )
@@ -123,6 +117,7 @@ class MainActivity : ComponentActivity() {
         fun requestPermissions()
         fun openNotificationAccess()
         fun openAccessibility()
+        fun openUsageAccess()
         fun openAppInfo()
         fun requestBatteryExemption()
         fun openUrl(url: String)

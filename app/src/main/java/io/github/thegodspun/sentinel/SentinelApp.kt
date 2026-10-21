@@ -1,6 +1,7 @@
 package io.github.thegodspun.sentinel
 
 import android.app.Application
+import io.github.thegodspun.sentinel.core.HabitStore
 import io.github.thegodspun.sentinel.core.InboxStore
 import io.github.thegodspun.sentinel.core.NotesStore
 import io.github.thegodspun.sentinel.core.TrackerStore
@@ -17,6 +18,8 @@ class SentinelApp : Application() {
         private set
     lateinit var inbox: InboxStore
         private set
+    lateinit var habits: HabitStore
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -24,6 +27,7 @@ class SentinelApp : Application() {
         tracker = TrackerStore(File(filesDir, "tracker.json"))
         notes = NotesStore(File(filesDir, "notes.txt"))
         inbox = InboxStore(File(filesDir, "inbox.json"))
+        habits = HabitStore(File(filesDir, "habits.json"))
         Notifications.createChannels(this)
         SentinelWorker.schedule(this)
         if (settings.alwaysOn) AgentService.start(this)

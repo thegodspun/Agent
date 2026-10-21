@@ -1,3 +1,9 @@
 <resources>
-    <color name="launcher_background">#1B3A5C</color>
+    <!-- Sentinel palette: blue first, with green, white and black accents. -->
+    <color name="sentinel_blue">#1565C0</color>
+    <color name="sentinel_blue_deep">#0D3B7A</color>
+    <color name="sentinel_green">#2EAD4B</color>
+    <color name="sentinel_white">#FFFFFF</color>
+    <color name="sentinel_black">#000000</color>
+    <color name="launcher_background">#1565C0</color>
 </resources>

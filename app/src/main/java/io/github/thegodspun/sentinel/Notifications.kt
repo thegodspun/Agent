@@ -14,7 +14,7 @@ import androidx.core.content.ContextCompat
 object Notifications {
     const val CHANNEL_SERVICE = "service"
     const val CHANNEL_REMINDERS = "reminders"
-    const val CHANNEL_BRIEFING = "briefing"
+    const val CHANNEL_BRIEFING = "wake_briefing"
 
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
@@ -27,9 +27,13 @@ object Notifications {
                 NotificationChannel(CHANNEL_REMINDERS, "Deadlines & alerts", NotificationManager.IMPORTANCE_HIGH).apply {
                     description = "Deadline reminders and urgent items found in your notifications"
                 },
-                NotificationChannel(CHANNEL_BRIEFING, "Morning briefing", NotificationManager.IMPORTANCE_DEFAULT),
+                NotificationChannel(CHANNEL_BRIEFING, "Wake-up briefing", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Pressing matters and a habit note, sent when you start your day"
+                },
             )
         )
+        // Replaced by the wake-up briefing channel, which pops up on screen.
+        manager.deleteNotificationChannel("briefing")
     }
 
     /** Opens the app; with [voice] it starts listening right away. */
@@ -49,13 +53,14 @@ object Notifications {
         ) return
         val notification = NotificationCompat.Builder(context, channel)
             .setSmallIcon(R.drawable.ic_sentinel)
+            .setColor(ContextCompat.getColor(context, R.color.sentinel_blue))
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(openAppIntent(context, requestCode = id))
             .setAutoCancel(true)
             .setPriority(
-                if (channel == CHANNEL_REMINDERS) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT
+                if (channel == CHANNEL_SERVICE) NotificationCompat.PRIORITY_MIN else NotificationCompat.PRIORITY_HIGH
             )
             .build()
         NotificationManagerCompat.from(context).notify(id, notification)
