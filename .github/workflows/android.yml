@@ -1,0 +1,48 @@
+name: Build Android app
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test the agent core
+        run: ./gradlew --no-daemon :core:test
+
+      - name: Build the APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinel-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      # Publishes the APK as a GitHub release so it can be downloaded straight to the phone.
+      - name: Publish "latest-build" release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk Sentinel.apk
+          gh release delete latest-build --yes --cleanup-tag || true
+          gh release create latest-build Sentinel.apk \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --title "Sentinel latest build" \
+            --notes "Built from ${GITHUB_REF_NAME} at ${GITHUB_SHA::7}. On your phone, tap Sentinel.apk to download, then open it to install."

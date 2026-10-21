@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Sentinel</string>
+    <string name="tile_label">Ask Sentinel</string>
+    <string name="accessibility_description">Lets Sentinel read the screen and tap, type, scroll and press Back or Home when you ask it to operate an app for you. Calls, texts and taps always ask you first. Nothing is read unless you give Sentinel a request.</string>
+</resources>
